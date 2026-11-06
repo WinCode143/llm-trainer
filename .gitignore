@@ -1,0 +1,12 @@
+data/
+.env
+backend/.venv/
+frontend/node_modules/
+frontend/dist/
+__pycache__/
+*.pyc
+backend/.venv-unsloth/
+backend/unsloth_compiled_cache/
+tools/
+frontend/tsconfig.tsbuildinfo
+backend/.venv-vllm/

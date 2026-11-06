@@ -1,0 +1,8 @@
+# Separate environment for vLLM-accelerated GRPO (it brings its own torch).
+# Install: ./setup-vllm.sh
+vllm
+trl
+peft
+bitsandbytes
+datasets
+accelerate

@@ -1,0 +1,5 @@
+# Separate environment for the Unsloth training engine (it pins its own transformers/trl versions).
+# Install: ./setup-unsloth.sh
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.11.0
+unsloth
