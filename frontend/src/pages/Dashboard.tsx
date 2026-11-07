@@ -34,7 +34,7 @@ export default function Dashboard() {
     <>
       <div className="page-head">
         <div>
-          <h1>Panel</h1>
+          <h1>Dashboard</h1>
           <div className="sub">System status and recent activity</div>
         </div>
       </div>
@@ -87,7 +87,7 @@ export default function Dashboard() {
         <div className="row between"><h2 style={{ margin: 0 }}>Engines and tools</h2><Link to="/system">Install / configure →</Link></div>
         <div className="row" style={{ gap: 8, marginTop: 10 }}>
           {[["unsloth", "Unsloth (fast training)"], ["vllm", "vLLM (fast generation)"], ["llama_cpp", "llama.cpp (GGUF)"],
-            ["tesseract", "OCR de PDFs"], ["hf_token", "Token de Hugging Face"]].map(([k, label]) => {
+            ["tesseract", "PDF OCR"], ["hf_token", "Hugging Face token"]].map(([k, label]) => {
             const ok = k === "vllm" ? sys?.vllm : sys?.tools?.[k];
             return <span key={k} className={`badge ${ok ? "ok" : ""}`}>{ok ? "✓" : "○"} {label}</span>;
           })}

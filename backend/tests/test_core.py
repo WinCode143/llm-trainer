@@ -292,6 +292,36 @@ class TestProviders:
         with pytest.raises(RuntimeError, match="no longer exists"):
             providers.complete(999999, "hello")
 
+    def test_agent_with_helper_keeps_the_question_after_a_tool_call(self, monkeypatch):
+        """With an external helper, each turn has to carry the whole conversation: after a tool
+        call the last message is the tool's result, and the user's question must still be there."""
+        from app.services import agents, providers
+        calls = []
+
+        def fake_complete(helper, prompt, *, system=None, history=None, **kw):
+            calls.append({"prompt": prompt, "system": system, "history": history or []})
+            if len(calls) == 1:
+                return '<tool_call>{"name": "calculate", "arguments": {"expression": "2+3"}}</tool_call>'
+            return "The answer is 5."
+
+        monkeypatch.setattr(providers, "complete", fake_complete)
+        agent = {"helper": 1, "system_prompt": "Be brief.", "tools": [{"id": "calculator", "config": {}}],
+                 "max_steps": 3}
+        events = list(agents.run(agent, [{"role": "user", "content": "What is 2+3?"}]))
+        assert events[-1]["type"] == "done" and events[-1]["final"] == "The answer is 5."
+        second = calls[1]
+        assert second["prompt"].startswith("Result of calculate")
+        assert second["history"][0] == {"role": "user", "content": "What is 2+3?"}
+        assert second["history"][1]["role"] == "assistant"
+        assert "Be brief." in second["system"]
+
+    def test_anthropic_history_alternates_roles(self):
+        from app.services import providers
+        merged = providers._merge_roles([{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"},
+                                         {"role": "user", "content": "c"}, {"role": "user", "content": "d"}])
+        assert [m["role"] for m in merged] == ["user", "assistant", "user"]
+        assert merged[-1]["content"] == "c\n\nd"
+
     def test_complete_json_rescues_wrapped_json(self, monkeypatch):
         """Models often return the JSON wrapped in text; it has to be pulled out anyway."""
         from app.services import providers

@@ -102,27 +102,41 @@ def remote_models(p: Provider) -> list[str]:
         return sorted(m["id"] for m in r.json().get("data", []))
 
 
-def _messages(prompt: str, system: str | None) -> list[dict]:
-    return ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
+def _messages(prompt: str, system: str | None, history: list[dict] | None = None) -> list[dict]:
+    return (([{"role": "system", "content": system}] if system else []) + list(history or [])
+            + [{"role": "user", "content": prompt}])
+
+
+def _merge_roles(msgs: list[dict]) -> list[dict]:
+    """Joins consecutive messages with the same role (Anthropic requires user/assistant to alternate)."""
+    out: list[dict] = []
+    for m in msgs:
+        if out and out[-1]["role"] == m["role"]:
+            out[-1] = {"role": m["role"], "content": out[-1]["content"] + "\n\n" + m["content"]}
+        else:
+            out.append({"role": m["role"], "content": m["content"]})
+    return out
 
 
 def generate(p: Provider, prompt: str, *, system: str | None = None, max_tokens: int = 600,
-             temperature: float = 0.3, json_mode: bool = False) -> str:
-    """One generation against an external provider. Returns the text."""
+             temperature: float = 0.3, json_mode: bool = False, history: list[dict] | None = None) -> str:
+    """One generation against an external provider. Returns the text.
+
+    `history` holds the earlier turns of a conversation (user/assistant), sent before `prompt`."""
     if p.kind == "anthropic":
         body: dict[str, Any] = {"model": p.model, "max_tokens": max_tokens, "temperature": temperature,
-                                "messages": [{"role": "user", "content": prompt}]}
+                                "messages": _merge_roles(list(history or []) + [{"role": "user", "content": prompt}])}
         if system:
             body["system"] = system
         if json_mode:  # Claude has no JSON mode: it's asked for in the prompt and cleaned up afterwards
-            body["messages"][0]["content"] += "\n\nReply ONLY with valid JSON, with no text around it."
+            body["messages"][-1]["content"] += "\n\nReply ONLY with valid JSON, with no text around it."
         with _client(p) as c:
             r = c.post("/messages", json=body)
             if r.status_code != 200:
                 raise RuntimeError(f"{p.name}: {_err(r)}")
             return "".join(b.get("text", "") for b in r.json().get("content", []) if b.get("type") == "text")
 
-    body = {"model": p.model, "messages": _messages(prompt, system), "max_tokens": max_tokens,
+    body = {"model": p.model, "messages": _messages(prompt, system, history), "max_tokens": max_tokens,
             "temperature": temperature}
     if json_mode:
         body["response_format"] = {"type": "json_object"}
@@ -156,7 +170,7 @@ def test(p: Provider) -> dict:
 
 def complete(helper: int | None, prompt: str, *, system: str | None = None, max_tokens: int = 600,
              temperature: float = 0.3, json_mode: bool = False, enable_thinking: bool | None = False,
-             on_token=None) -> str:
+             on_token=None, history: list[dict] | None = None) -> str:
     """Generates with the chosen helper, or with the model loaded in VRAM if `helper` is None.
 
     It's the only path auxiliary generations go through (synthetic data, graph, judge,
@@ -172,11 +186,11 @@ def complete(helper: int | None, prompt: str, *, system: str | None = None, max_
         if not p.enabled:
             raise RuntimeError(f"The helper model “{p.name}” is disabled")
         return strip_think(generate(p, prompt, system=system, max_tokens=max_tokens, temperature=temperature,
-                                    json_mode=json_mode)).strip()
+                                    json_mode=json_mode, history=history)).strip()
 
     if not manager.current:
         raise RuntimeError("No model is loaded. Load one in Models, or pick an external helper model.")
-    msgs = _messages(prompt, system)
+    msgs = _messages(prompt, system, history)
     params = GenParams(max_new_tokens=max_tokens, temperature=temperature, enable_thinking=enable_thinking)
     if on_token:
         parts = []

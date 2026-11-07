@@ -266,7 +266,7 @@ def _http(cfg: dict, args: dict) -> str:
     except urllib.error.HTTPError as e:
         return f"HTTP {e.code}: {e.read(500).decode('utf-8', 'replace')}"
     except Exception as e:  # noqa: BLE001
-        return f"Error de red: {e}"
+        return f"Network error: {e}"
     return text[: int(cfg.get("max_chars") or 4000)]
 
 

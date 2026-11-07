@@ -14,7 +14,16 @@ Anthropic) are optional helpers for tasks a small local model is bad at, such as
 answers or generating synthetic data.
 
 FastAPI + SQLite backend, React + TypeScript frontend. About 17k lines of Python and
-TypeScript, with 112 backend tests.
+TypeScript, with 114 backend tests.
+
+![Training form: base model, dataset, method, adapter and a VRAM estimate](docs/training.png)
+
+| RAG: hybrid search with reranking | Agent with SQL tools, using a local Ollama model as helper |
+| --- | --- |
+| ![RAG test search over a small help center, with rerank, cosine and BM25 scores per chunk](docs/rag-search.png) | ![An agent reads the schema, writes the SQL for Q2 and Q3, and answers with the numbers](docs/agent.png) |
+
+The screenshots use made-up data: two help-center pages and a small SQLite sales table. The
+agent runs on `qwen3:8b` through Ollama.
 
 ## Requirements
 

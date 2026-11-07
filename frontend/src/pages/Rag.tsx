@@ -71,7 +71,7 @@ function CollectionDetail({ c, onChange }: { c: Collection; onChange: () => void
           <div style={{ minWidth: 0 }}>
             <h2 style={{ marginBottom: 2 }}>{c.name}</h2>
             <div className="sub">
-              {MODES[c.search_mode]} · {c.reranker ? <>rerank <code>{c.reranker.split("/").pop()}</code></> : "sin rerank"} · top-{c.top_k}
+              {MODES[c.search_mode]} · {c.reranker ? <>rerank <code>{c.reranker.split("/").pop()}</code></> : "no rerank"} · top-{c.top_k}
               {c.query_mode && c.query_mode !== "simple" && <> · query <b>{c.query_mode}</b></>}
               {c.min_score > 0 && <> · threshold {c.min_score}</>} · embeddings <code>{c.embed_model.split("/").pop()}</code> · {fmtDate(c.created_at)}
             </div>

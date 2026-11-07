@@ -106,7 +106,7 @@ function DatasetDetail({ ds, onChange }: { ds: Dataset; onChange: () => void }) 
           <h3 style={{ margin: 0 }}>Preview</h3>
           <div className="row">
             <button className="sm" disabled={page === 0} onClick={() => setPage(page - 1)}><ChevronLeft size={14} /></button>
-            <span className="sub">{page * PAGE + 1}–{Math.min((page + 1) * PAGE, rows?.total ?? 0)} de {rows?.total ?? 0}</span>
+            <span className="sub">{page * PAGE + 1}–{Math.min((page + 1) * PAGE, rows?.total ?? 0)} of {rows?.total ?? 0}</span>
             <button className="sm" disabled={(page + 1) * PAGE >= (rows?.total ?? 0)} onClick={() => setPage(page + 1)}><ChevronRight size={14} /></button>
           </div>
         </div>

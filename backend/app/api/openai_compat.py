@@ -1,5 +1,5 @@
 """OpenAI-compatible API (/v1) to use LLM Trainer's models from any client
-(Open WebUI, LibreChat, Continue, SDK de openai, LangChain…).
+(Open WebUI, LibreChat, Continue, the openai SDK, LangChain…).
 
 Our own extension: the `rag_collection` field (name or id) in /v1/chat/completions applies
 that collection's RAG (with its configured hybrid search, rerank and threshold) before answering.

@@ -41,8 +41,11 @@ def _generate(agent: dict, convo: list[dict], params, tools_schema):
     helper = agent.get("helper")
     if helper:
         from . import providers
-        piece = providers.complete(helper, convo[-1]["content"],
-                                   system="\n\n".join(m["content"] for m in convo[:-1] if m["role"] != "user") or None,
+        # The whole conversation goes along: after a tool call the last message is the tool's
+        # result, and without the earlier turns the model would lose the user's question
+        system = "\n\n".join(m["content"] for m in convo[:-1] if m["role"] == "system") or None
+        history = [m for m in convo[:-1] if m["role"] in ("user", "assistant")]
+        piece = providers.complete(helper, convo[-1]["content"], system=system, history=history,
                                    max_tokens=params.max_new_tokens, temperature=params.temperature)
         yield piece
         return

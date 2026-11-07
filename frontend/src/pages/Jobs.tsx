@@ -104,7 +104,7 @@ export default function Jobs() {
             </select>
           </Field>
           <div className="spacer" />
-          <span className="sub">{shown.length} de {jobs?.length ?? 0}</span>
+          <span className="sub">{shown.length} of {jobs?.length ?? 0}</span>
         </div>
 
         {!shown.length ? <div className="empty">{jobs?.length ? "No jobs match that filter" : "You haven't launched anything yet"}</div> : (
