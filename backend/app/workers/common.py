@@ -12,7 +12,7 @@ CHATML_TEMPLATE = (
 
 
 class Emitter:
-    """Escribe eventos JSONL que el backend lee para mostrar el progreso en vivo."""
+    """Writes JSONL events that the backend reads to show live progress."""
 
     def __init__(self, job_dir: Path):
         self.path = job_dir / "events.jsonl"
@@ -33,16 +33,16 @@ class StopFlag:
         signal.signal(signal.SIGINT, self._handle)
 
     def _handle(self, *_):
-        print("[worker] Señal de parada recibida; se guardará el checkpoint y se terminará.", flush=True)
+        print("[worker] Stop signal received; the checkpoint will be saved and the run will end.", flush=True)
         self.stop = True
 
 
 def filter_kwargs(cls, kwargs: dict) -> dict:
-    """Quita kwargs que la versión instalada de la clase (dataclass de config) no acepta."""
+    """Drops kwargs that the installed version of the class (a config dataclass) doesn't accept."""
     names = {f.name for f in fields(cls)}
     dropped = [k for k in kwargs if k not in names]
     if dropped:
-        print(f"[worker] Parámetros no soportados por {cls.__name__} (ignorados): {dropped}", flush=True)
+        print(f"[worker] Parameters not supported by {cls.__name__} (ignored): {dropped}", flush=True)
     return {k: v for k, v in kwargs.items() if k in names}
 
 

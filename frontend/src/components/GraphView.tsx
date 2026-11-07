@@ -6,7 +6,7 @@ const PALETTE = ["#7c8cff", "#3fb950", "#d29922", "#f85149", "#a371f7", "#39c5cf
 type Node = { id: string; name: string; type: string; degree: number; community: number | null; desc: string; sources: string[] };
 type Link = { source: any; target: any; relation: string; weight: number };
 
-/** Grafo de entidades interactivo (canvas). Resalta los vecinos al pasar el ratón. */
+/** Interactive entity graph (canvas). Highlights the neighbours on hover. */
 export function GraphView({ nodes, links, highlight, height = 460 }: { nodes: Node[]; links: Link[]; highlight?: string[]; height?: number }) {
   const box = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(600);
@@ -55,7 +55,7 @@ export function GraphView({ nodes, links, highlight, height = 460 }: { nodes: No
       />
       {hover && (
         <div className="source" style={{ position: "absolute", bottom: 8, left: 8, right: 8, fontSize: 12, pointerEvents: "none" }}>
-          <b>{hover.name}</b> <span className="badge">{hover.type}</span> <span className="sub">· {hover.degree} conexiones · {hover.sources.join(", ").slice(0, 60)}</span>
+          <b>{hover.name}</b> <span className="badge">{hover.type}</span> <span className="sub">· {hover.degree} connections · {hover.sources.join(", ").slice(0, 60)}</span>
           {hover.desc && <div className="sub">{hover.desc}</div>}
         </div>
       )}

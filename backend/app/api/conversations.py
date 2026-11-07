@@ -11,8 +11,8 @@ router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 def list_conversations(q: str | None = None, limit: int = 200, offset: int = 0, s: Session = Depends(get_session)):
     base = select(Conversation).order_by(Conversation.updated_at.desc())
     if q:
-        # El filtro busca dentro de los mensajes, así que se recorre todo y se recorta DESPUÉS:
-        # limitar antes haría que buscar sólo mirase las conversaciones más recientes.
+        # The filter searches inside the messages, so everything is walked and trimmed AFTERWARDS:
+        # limiting first would make search only look at the most recent conversations.
         ql = q.lower()
         rows = [c for c in s.exec(base).all()
                 if ql in c.title.lower() or any(ql in (m.get("content") or "").lower() for m in c.messages)]
@@ -31,7 +31,7 @@ class ConvBody(BaseModel):
 
 @router.post("")
 def create(body: ConvBody, s: Session = Depends(get_session)):
-    c = Conversation(title=body.title or "Nueva conversación", messages=body.messages or [], settings=body.settings or {})
+    c = Conversation(title=body.title or "New conversation", messages=body.messages or [], settings=body.settings or {})
     s.add(c)
     s.commit()
     s.refresh(c)
@@ -53,8 +53,8 @@ def update(cid: int, body: ConvBody, s: Session = Depends(get_session)):
         raise HTTPException(404)
     if body.messages is not None:
         c.messages = body.messages
-        # Título automático a partir del primer mensaje del usuario
-        if c.title == "Nueva conversación":
+        # Automatic title from the user's first message
+        if c.title == "New conversation":
             first = next((m.get("content", "") for m in body.messages if m.get("role") == "user"), "")
             if first:
                 c.title = (first[:60] + "…") if len(first) > 60 else first

@@ -1,8 +1,8 @@
-"""API compatible con OpenAI (/v1) para usar los modelos de LLM Trainer desde cualquier cliente
+"""OpenAI-compatible API (/v1) to use LLM Trainer's models from any client
 (Open WebUI, LibreChat, Continue, SDK de openai, LangChain…).
 
-Extensión propia: el campo `rag_collection` (nombre o id) en /v1/chat/completions aplica el RAG
-de esa colección (búsqueda híbrida, rerank y umbral configurados) antes de responder.
+Our own extension: the `rag_collection` field (name or id) in /v1/chat/completions applies
+that collection's RAG (with its configured hybrid search, rerank and threshold) before answering.
 """
 import json
 import threading
@@ -23,7 +23,7 @@ from ..services.jobs import is_gpu_busy
 
 def auth(authorization: str | None = Header(default=None)):
     if settings.api_key and authorization != f"Bearer {settings.api_key}":
-        raise HTTPException(401, {"error": {"message": "API key inválida", "type": "invalid_request_error"}})
+        raise HTTPException(401, {"error": {"message": "Invalid API key", "type": "invalid_request_error"}})
 
 
 router = APIRouter(prefix="/v1", tags=["openai"], dependencies=[Depends(auth)])
@@ -49,7 +49,7 @@ class ChatRequest(BaseModel):
     stream: bool = False
     seed: int | None = None
     frequency_penalty: float | None = None
-    # Extensiones de LLM Trainer
+    # LLM Trainer extensions
     rag_collection: str | int | None = None
     top_k: int = 50
     repetition_penalty: float | None = None
@@ -57,7 +57,7 @@ class ChatRequest(BaseModel):
 
 
 def _text(content) -> str:
-    """content puede ser str o lista de partes [{type: text, text}] (formato nuevo de OpenAI)."""
+    """content can be a str or a list of parts [{type: text, text}] (OpenAI's newer format)."""
     if isinstance(content, list):
         return "".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") in ("text", None))
     return content or ""
@@ -67,16 +67,16 @@ def _ensure_model(name: str | None) -> str:
     cur = manager.current
     if not name or (cur and name == cur.name):
         if not cur:
-            raise HTTPException(400, {"error": {"message": "No hay modelo cargado; indica `model` o carga uno en la UI"}})
+            raise HTTPException(400, {"error": {"message": "No model is loaded; pass `model` or load one in the UI"}})
         return cur.name
     with Session(engine) as s:
         m = s.exec(select(Model).where(Model.name == name)).first()
     if not m:
-        if cur:  # nombres genéricos (gpt-4o, default…) → usar el cargado
+        if cur:  # generic names (gpt-4o, default…) → use the loaded one
             return cur.name
-        raise HTTPException(404, {"error": {"message": f"Modelo '{name}' no registrado"}})
+        raise HTTPException(404, {"error": {"message": f"Model '{name}' isn't registered"}})
     if is_gpu_busy():
-        raise HTTPException(409, {"error": {"message": "GPU ocupada con un entrenamiento"}})
+        raise HTTPException(409, {"error": {"message": "The GPU is busy with a training run"}})
     manager.load(model_id=m.id, name=m.name, kind=m.kind, path=m.path, base_model=m.base_model,
                  engine=manager.preferred_engine if m.kind != "gguf" else "auto")
     return m.name
@@ -89,7 +89,7 @@ def _rag_collection(ref) -> RagCollection | None:
         c = s.get(RagCollection, int(ref)) if str(ref).isdigit() else \
             s.exec(select(RagCollection).where(RagCollection.name == str(ref))).first()
     if not c:
-        raise HTTPException(404, {"error": {"message": f"Colección RAG '{ref}' no encontrada"}})
+        raise HTTPException(404, {"error": {"message": f"RAG collection '{ref}' not found"}})
     return c
 
 
@@ -103,7 +103,7 @@ def chat_completions(req: ChatRequest):
         system = next((m["content"] for m in msgs if m["role"] == "system"), None)
         convo = [m for m in msgs if m["role"] != "system"]
         msgs, sources, _ = rag.prepare(coll, convo[-1]["content"], convo[:-1], system, None)
-    # frequency_penalty (OpenAI, 0–2) se aproxima con repetition_penalty (1 = sin penalización)
+    # frequency_penalty (OpenAI, 0–2) is approximated with repetition_penalty (1 = no penalty)
     rp = req.repetition_penalty or 1.0 + max(0.0, req.frequency_penalty or 0) * 0.5
     params = GenParams(max_new_tokens=req.max_completion_tokens or req.max_tokens or 1024, temperature=req.temperature,
                        top_p=req.top_p, top_k=req.top_k, repetition_penalty=rp, seed=req.seed,

@@ -1,10 +1,10 @@
-"""Troceado de documentos y búsqueda léxica BM25.
+"""Document chunking and BM25 lexical search.
 
-Partir bien es la mitad del trabajo de un RAG: un fragmento que corta una frase por la mitad o que
-mete tres temas juntos hace que la búsqueda falle por mucho que el modelo de embeddings sea bueno.
-Por eso hay plantillas por tipo de documento y troceo consciente de las secciones.
+Splitting well is half the work in RAG: a chunk that cuts a sentence in half or
+lumps three topics together makes search fail no matter how good the embedding model is.
+That's why there are templates per document type and section-aware chunking.
 
-BM25 va aquí porque comparte el tokenizado con el troceo: ambos tienen que ver el texto igual.
+BM25 lives here because it shares tokenization with chunking: both have to see the text the same way.
 """
 import csv
 import io
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-# Índice BM25 por colección, que se rehace cuando cambian sus documentos
+# BM25 index per collection, rebuilt when its documents change
 _bm25: dict[int, "BM25"] = {}
 
 
@@ -27,10 +27,10 @@ SEPS = ["\n\n", "\n", ". ", " "]
 
 def split_sections(text: str, stack: list[tuple[int, str]] | None = None
                    ) -> tuple[list[tuple[str, str]], list[tuple[int, str]]]:
-    """Parte Markdown por títulos → [(ruta de títulos, cuerpo)].
+    """Splits Markdown by headings → [(heading path, body)].
 
-    `stack` es la pila de títulos abiertos [(nivel, título)] y permite continuar entre páginas.
-    Un título cierra todos los de nivel igual o mayor (así dos h2 seguidos son hermanos aunque no haya h1).
+    `stack` is the stack of open headings [(level, title)] and lets it carry on across pages.
+    A heading closes all those of the same or higher level (so two h2 in a row are siblings even without an h1).
     """
     stack = list(stack or [])
     sections, buf = [], []
@@ -57,7 +57,7 @@ def split_sections(text: str, stack: list[tuple[int, str]] | None = None
 
 
 def chunk_text(text: str, size: int, overlap: int) -> list[str]:
-    """Troceo recursivo que respeta párrafos → líneas → frases → palabras, conservando los separadores."""
+    """Recursive chunking that respects paragraphs → lines → sentences → words, keeping the separators."""
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if not text:
         return []
@@ -87,7 +87,7 @@ def chunk_text(text: str, size: int, overlap: int) -> list[str]:
     pieces = [p.strip() for p in split(text, 0) if p.strip()]
     if overlap <= 0 or len(pieces) < 2:
         return pieces
-    # Solapamiento: cola del chunk anterior, cortada en límite de palabra
+    # Overlap: the tail of the previous chunk, cut at a word boundary
     result = [pieces[0]]
     for prev, cur in zip(pieces, pieces[1:]):
         tail = prev[-overlap:]
@@ -98,15 +98,15 @@ def chunk_text(text: str, size: int, overlap: int) -> list[str]:
 
 
 TEMPLATES = {
-    "general": "Por secciones (títulos) y párrafos — documentos en general",
-    "qa": "Preguntas frecuentes: cada pregunta con su respuesta",
-    "table": "Tablas/CSV: una fila por fragmento con sus cabeceras",
-    "laws": "Normativa: un fragmento por artículo («Artículo N»)",
-    "page": "Una página/diapositiva por fragmento (presentaciones)",
-    "one": "Documento entero en un fragmento (textos cortos)",
+    "general": "By section (headings) and paragraph — documents in general",
+    "qa": "FAQs: each question with its answer",
+    "table": "Tables/CSV: one row per chunk with its headers",
+    "laws": "Legal texts: one chunk per article (“Article N”)",
+    "page": "One page/slide per chunk (presentations)",
+    "one": "The whole document in one chunk (short texts)",
 }
-QA_Q = re.compile(r"^\s*(?:\*\*)?(?:P|Q|Pregunta|Question)\s*[:.\-]|^\s*(?:#+\s*)?[¿].+\?\s*(?:\*\*)?$", re.I)
-ARTICLE = re.compile(r"^\s*(?:#+\s*)?(?:\*\*)?(Art[íi]culo|Art\.)\s+\d+", re.I | re.M)
+QA_Q = re.compile(r"^\s*(?:\*\*)?(?:P|Q|Pregunta|Question)\s*[:.\-]|^\s*(?:#+\s*)?[¿]?[A-Z¿][^?]*\?\s*(?:\*\*)?$", re.I)
+ARTICLE = re.compile(r"^\s*(?:#+\s*)?(?:\*\*)?(Art[íi]culo|Article|Art\.|Section|Sec\.|§)\s*\d+", re.I | re.M)
 
 
 def _qa_chunks(text: str) -> list[str]:
@@ -126,7 +126,7 @@ def _table_chunks(filename: str, raw_text: str) -> list[str]:
     rows: list[list[str]] = []
     if filename.lower().endswith(".csv"):
         rows = [r for r in csv.reader(io.StringIO(raw_text)) if any(c.strip() for c in r)]
-    else:  # tablas Markdown | a | b |
+    else:  # Markdown tables | a | b |
         for line in raw_text.splitlines():
             if line.strip().startswith("|") and not re.match(r"^\s*\|?\s*:?-{2,}", line):
                 rows.append([c.strip() for c in line.strip().strip("|").split("|")])
@@ -169,7 +169,7 @@ def make_chunks(filename: str, pages: list[tuple[str, dict]], size: int, overlap
         else:
             idx = [m.start() for m in ARTICLE.finditer(full)]
             parts = [full[i:j].strip() for i, j in zip([0] + idx, idx + [len(full)])] if idx else []
-        parts = [p_ for p_ in parts if p_.strip()]  # el texto puede empezar ya por un artículo/pregunta
+        parts = [p_ for p_ in parts if p_.strip()]  # the text may already start with an article/question
         if len(parts) > 1:
             for p_ in parts:
                 title = p_.strip().splitlines()[0].strip("#* ")[:120]
@@ -187,17 +187,17 @@ def make_chunks(filename: str, pages: list[tuple[str, dict]], size: int, overlap
 
 
 def contextual(text: str, meta: dict, with_questions: bool = False) -> str:
-    """Texto que se indexa: cabecera documento › sección + chunk.
+    """Text that gets indexed: a document › section header + the chunk.
 
-    Las preguntas generadas NO se mezclan en el embedding del fragmento (diluían su vector y empeoraban la
-    búsqueda): se indexan como vectores propios en la colección auxiliar de preguntas (multi-vector) y sólo
-    se añaden al texto de BM25 (with_questions=True) para el emparejamiento léxico."""
+    Generated questions are NOT mixed into the chunk's embedding (they diluted its vector and made
+    search worse): they're indexed as their own vectors in the auxiliary questions collection (multi-vector) and only
+    added to the BM25 text (with_questions=True) for lexical matching."""
     head = Path(meta.get("source", "")).stem if not str(meta.get("source", "")).startswith("http") else meta["source"]
     if meta.get("section"):
         head += f" › {meta['section']}"
     out = f"{head}\n{text}" if head else text
     if with_questions and meta.get("questions"):
-        out += "\nPreguntas que responde:\n" + meta["questions"]
+        out += "\nQuestions it answers:\n" + meta["questions"]
     return out
 
 

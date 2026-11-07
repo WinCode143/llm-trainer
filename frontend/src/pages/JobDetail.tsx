@@ -31,12 +31,12 @@ export default function JobDetail() {
     return () => es.close();
   }, [id, reload]);
 
-  // Autoscroll: al cargar el log y mientras el usuario esté al final
+  // Autoscroll: when the log loads and while the user stays at the bottom
   const stuck = useRef(true);
   useEffect(() => {
     const el = logRef.current;
     if (el && stuck.current) el.scrollTop = el.scrollHeight;
-  }, [log, !!job]); // el log puede llegar antes que el trabajo (y el div aún no existe)
+  }, [log, !!job]); // the log can arrive before the job (and the div doesn't exist yet)
 
   const logs = useMemo(() => events.filter((e) => e.type === "log"), [events]);
   const trainPts = logs.filter((e) => e.loss !== undefined).map((e) => ({ step: e.step, loss: e.loss, lr: e.learning_rate, grad_norm: e.grad_norm, acc: e.mean_token_accuracy }));
@@ -68,7 +68,7 @@ export default function JobDetail() {
     return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
   }, [events, progress]);
 
-  if (!job) return <div className="empty">{loadErr ? <>Trabajo no encontrado. <Link to="/training">Volver a Entrenamiento</Link></> : "Cargando…"}</div>;
+  if (!job) return <div className="empty">{loadErr ? <>Job not found. <Link to="/training">Back to Training</Link></> : "Loading…"}</div>;
   const st = status ?? job.status;
   const cfg = job.config;
   const pct = progress?.max_steps ? progress.step / progress.max_steps : 0;
@@ -77,27 +77,27 @@ export default function JobDetail() {
     <>
       <div className="page-head">
         <div>
-          <Link to="/training" className="sub row" style={{ gap: 4 }}><ArrowLeft size={14} /> Entrenamiento</Link>
+          <Link to="/training" className="sub row" style={{ gap: 4 }}><ArrowLeft size={14} /> Training</Link>
           <h1 className="row">{job.name} <StatusBadge status={st} /></h1>
-          <div className="sub">#{job.id} · creado {fmtDate(job.created_at)} · duración {duration(job.started_at, job.finished_at)}</div>
+          <div className="sub">#{job.id} · created {fmtDate(job.created_at)} · duration {duration(job.started_at, job.finished_at)}</div>
         </div>
         <div className="row">
-          {st === "running" && <button onClick={() => api.post(`/api/jobs/${id}/cancel`).then(() => notify("Deteniendo; se guardará el progreso…"))}><Square size={14} /> Detener y guardar</button>}
-          {st === "running" && <button className="danger" onClick={async () => (await confirm("¿Matar el proceso?", "Se detiene inmediatamente SIN guardar. Usa «Detener y guardar» para conservar el progreso.", { label: "Matar" })) && api.post(`/api/jobs/${id}/kill`)}>Matar</button>}
-          {st === "queued" && <button onClick={() => api.post(`/api/jobs/${id}/cancel`).then(reload)}>Cancelar</button>}
-          {!["running", "queued"].includes(st) && <button className="danger" onClick={async () => (await confirm("¿Borrar el registro del trabajo?", "Los archivos (checkpoints, adaptadores) se conservan en disco.", { label: "Borrar" })) && api.del(`/api/jobs/${id}`).then(() => history.back())}><Trash2 size={14} /></button>}
+          {st === "running" && <button onClick={() => api.post(`/api/jobs/${id}/cancel`).then(() => notify("Stopping; progress will be saved…"))}><Square size={14} /> Stop and save</button>}
+          {st === "running" && <button className="danger" onClick={async () => (await confirm("Kill the process?", "It stops immediately WITHOUT saving. Use “Stop and save” to keep the progress.", { label: "Kill" })) && api.post(`/api/jobs/${id}/kill`)}>Kill</button>}
+          {st === "queued" && <button onClick={() => api.post(`/api/jobs/${id}/cancel`).then(reload)}>Cancel</button>}
+          {!["running", "queued"].includes(st) && <button className="danger" onClick={async () => (await confirm("Delete the job record?", "The files (checkpoints, adapters) stay on disk.", { label: "Delete" })) && api.del(`/api/jobs/${id}`).then(() => history.back())}><Trash2 size={14} /></button>}
         </div>
       </div>
 
       {job.type !== "train" ? (
-        <div className="card stat"><div className="label">Progreso</div>
+        <div className="card stat"><div className="label">Progress</div>
           <div className="value" style={{ fontSize: 16 }}>{lastStatus?.message ?? (st === "queued" ? "En cola" : "—")}</div><Progress value={pct} /></div>
       ) : (
       <div className="grid g4">
-        <div className="card stat"><div className="label">Progreso</div><div className="value">{progress ? `${progress.step} / ${progress.max_steps}` : "—"}</div><Progress value={pct} /></div>
+        <div className="card stat"><div className="label">Progress</div><div className="value">{progress ? `${progress.step} / ${progress.max_steps}` : "—"}</div><Progress value={pct} /></div>
         <div className="card stat"><div className="label">Loss actual</div><div className="value">{trainPts.at(-1)?.loss?.toFixed(4) ?? "—"}</div><div className="sub">{evalPts.length ? `eval ${evalPts.at(-1)!.eval_loss.toFixed(4)}` : " "}</div></div>
-        <div className="card stat"><div className="label">Tiempo restante</div><div className="value">{st === "running" ? eta ?? "…" : "—"}</div><div className="sub">época {progress?.epoch?.toFixed?.(2) ?? "—"}</div></div>
-        <div className="card stat"><div className="label">VRAM pico (proceso)</div><div className="value">{gpu ? `${gpu.mem_gb} GB` : "—"}</div><div className="sub">{params ? `${(params.trainable / 1e6).toFixed(1)}M entrenables (${((100 * params.trainable) / params.total).toFixed(2)}%)` : " "}</div></div>
+        <div className="card stat"><div className="label">Time left</div><div className="value">{st === "running" ? eta ?? "…" : "—"}</div><div className="sub">epoch {progress?.epoch?.toFixed?.(2) ?? "—"}</div></div>
+        <div className="card stat"><div className="label">Peak VRAM (process)</div><div className="value">{gpu ? `${gpu.mem_gb} GB` : "—"}</div><div className="sub">{params ? `${(params.trainable / 1e6).toFixed(1)}M trainable (${((100 * params.trainable) / params.total).toFixed(2)}%)` : " "}</div></div>
       </div>
       )}
 
@@ -105,52 +105,52 @@ export default function JobDetail() {
       {(job.error || errorEv) && <div className="card"><div className="error-box">{errorEv?.message ?? job.error}</div></div>}
       {job.type === "embed" && (events.some((e) => e.type === "embed_eval")) && (
         <div className="card">
-          <h3>Recuperación en el conjunto reservado ({job.config.n_pairs} pares en total)</h3>
+          <h3>Retrieval on the held-out set ({job.config.n_pairs} pairs in total)</h3>
           <table>
             <thead><tr><th></th>{Object.keys(events.find((e) => e.type === "embed_eval")!).filter((k) => !["type", "t", "stage"].includes(k)).map((k) => <th key={k}>{k}</th>)}</tr></thead>
             <tbody>{events.filter((e) => e.type === "embed_eval").map((e) => (
-              <tr key={e.stage}><td><b>{e.stage === "antes" ? "Modelo base" : "Ajustado"}</b></td>
+              <tr key={e.stage}><td><b>{e.stage === "before" ? "Base model" : "Fine-tuned"}</b></td>
                 {Object.entries(e).filter(([k]) => !["type", "t", "stage"].includes(k)).map(([k, v]: any) => {
-                  const b = events.find((x) => x.type === "embed_eval" && x.stage === "antes")?.[k];
-                  const d = e.stage !== "antes" && b != null ? v - b : null;
+                  const b = events.find((x) => x.type === "embed_eval" && x.stage === "before")?.[k];
+                  const d = e.stage !== "before" && b != null ? v - b : null;
                   return <td key={k}>{(v * 100).toFixed(1)}%{d != null && <span style={{ color: d >= 0 ? "var(--ok)" : "var(--err)", marginLeft: 6 }}>{d >= 0 ? "+" : ""}{(d * 100).toFixed(1)}</span>}</td>;
                 })}</tr>
             ))}</tbody>
           </table>
-          {st === "completed" && <div className="sub" style={{ marginTop: 8 }}>Para usarlo: RAG → colección → Ajustes → «Re-indexar con otro modelo de embeddings».</div>}
+          {st === "completed" && <div className="sub" style={{ marginTop: 8 }}>To use it: RAG → collection → Settings → “Re-index with another embedding model”.</div>}
         </div>
       )}
       {job.type === "bench" && events.some((e) => e.type === "bench_task") && (
         <div className="card">
-          <h3>Resultados · {job.config.model_name}</h3>
+          <h3>Results · {job.config.model_name}</h3>
           <table>
-            <thead><tr><th>Tarea</th><th>Métrica</th><th>Valor</th><th>± error</th></tr></thead>
+            <thead><tr><th>Task</th><th>Metric</th><th>Value</th><th>± error</th></tr></thead>
             <tbody>{events.filter((e) => e.type === "bench_task").map((e) => (
               <tr key={e.task}><td><b>{e.task}</b>{e.subtasks > 1 && <span className="sub"> ({e.subtasks} subtareas)</span>}</td><td className="mono">{e.metric}</td>
                 <td><b>{e.value != null ? `${(e.value * 100).toFixed(1)}%` : "—"}</b></td><td className="sub">{e.stderr != null ? `±${(e.stderr * 100).toFixed(1)}` : ""}</td></tr>
             ))}</tbody>
           </table>
-          <div className="sub" style={{ marginTop: 6, fontSize: 12 }}>Límite: {job.config.limit || "todos"} ejemplos por tarea. Compara con el modelo base marcando ambos trabajos en la lista.</div>
+          <div className="sub" style={{ marginTop: 6, fontSize: 12 }}>Limit: {job.config.limit || "all"} examples per task. Compare with the base model by selecting both jobs in the list.</div>
         </div>
       )}
       {st === "completed" && job.result?.gguf && (
         <div className="card stack">
-          <div>✓ GGUF listo: <code>{job.result.gguf}</code></div>
-          <div className="sub">Úsalo en el Playground (ya está registrado en Modelos), en LM Studio abriendo el archivo, o en Ollama:</div>
+          <div>✓ GGUF ready: <code>{job.result.gguf}</code></div>
+          <div className="sub">Use it in the Playground (it's already registered in Models), in LM Studio by opening the file, or in Ollama:</div>
           <Markdown text={"```bash\ncd \"" + job.result.gguf.replace(/\/[^/]+$/, "") + "\"\nollama create " + job.name.replace(/-export$/, "") + " -f Modelfile\nollama run " + job.name.replace(/-export$/, "") + "\n```"} />
-          <div className="row"><Link to="/playground"><button className="primary">Probar en Playground</button></Link><Link to="/system"><button>Usar vía API OpenAI</button></Link></div>
+          <div className="row"><Link to="/playground"><button className="primary">Try it in the Playground</button></Link><Link to="/system"><button>Use it through the OpenAI API</button></Link></div>
         </div>
       )}
       {st === "completed" && job.result?.model && (
         <div className="card row between">
-          <div>✓ Modelo guardado en <code>{job.result.model}</code>{job.result.merged && <> · fusionado en <code>{job.result.merged}</code></>}</div>
-          <div className="row"><Link to="/playground"><button className="primary">Probar en Playground</button></Link><Link to="/models"><button>Ver en Modelos</button></Link></div>
+          <div>✓ Model saved to <code>{job.result.model}</code>{job.result.merged && <> · merged into <code>{job.result.merged}</code></>}</div>
+          <div className="row"><Link to="/playground"><button className="primary">Try it in the Playground</button></Link><Link to="/models"><button>See it in Models</button></Link></div>
         </div>
       )}
 
       {job.type === "train" && rewardKeys.length > 0 && (
         <div className="card" style={{ marginTop: 16 }}>
-          <h3>Recompensas (GRPO)</h3>
+          <h3>Rewards (GRPO)</h3>
           <ResponsiveContainer width="100%" height={240}>
             <LineChart data={logs.filter((e) => e.reward !== undefined)}>
               <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
@@ -200,10 +200,10 @@ export default function JobDetail() {
       <div className="grid g2" style={{ marginTop: 16, gridTemplateColumns: "minmax(0,2fr) minmax(0,1fr)" }}>
         <div className="card">
           <h3>Log</h3>
-          <div className="log" ref={logRef} onScroll={(e) => { const el = e.currentTarget; stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>{log.replace(/\r(?!\n)/g, "\n").split("\n").filter((l, i, a) => !(l.includes("it/s]") && a[i + 1]?.includes("it/s]"))).join("\n") || "Esperando salida…"}</div>
+          <div className="log" ref={logRef} onScroll={(e) => { const el = e.currentTarget; stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>{log.replace(/\r(?!\n)/g, "\n").split("\n").filter((l, i, a) => !(l.includes("it/s]") && a[i + 1]?.includes("it/s]"))).join("\n") || "Waiting for output…"}</div>
         </div>
         <div className="card">
-          <h3>Configuración</h3>
+          <h3>Configuration</h3>
           <div className="kv">
             {Object.entries(cfg).filter(([k]) => !["dataset_path", "output_dir"].includes(k)).map(([k, v]) => (
               <Fragment key={k}><span>{k}</span><span className="mono truncate" title={String(v)}>{typeof v === "object" ? JSON.stringify(v) : String(v)}</span></Fragment>

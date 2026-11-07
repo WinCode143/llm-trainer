@@ -1,4 +1,4 @@
-"""Worker de entrenamiento. Uso: python -m app.workers.train <job_dir>/config.json"""
+"""Training worker. Usage: python -m app.workers.train <job_dir>/config.json"""
 import json
 import math
 import os
@@ -40,7 +40,7 @@ UNSLOTH_TARGETS = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj
 
 
 def load_hf(cfg, em, use_lora, quant, dtype):
-    """Ruta estándar: transformers + bitsandbytes + PEFT."""
+    """The standard path: transformers + bitsandbytes + PEFT."""
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
@@ -69,7 +69,7 @@ def load_hf(cfg, em, use_lora, quant, dtype):
 
 
 def load_unsloth(cfg, em, use_lora, quant):
-    """Ruta Unsloth: kernels Triton propios, ~2x más rápido y menos VRAM."""
+    """The Unsloth path: its own Triton kernels, ~2x faster and less VRAM."""
     from unsloth import FastLanguageModel
 
     model, tok = FastLanguageModel.from_pretrained(
@@ -77,7 +77,7 @@ def load_unsloth(cfg, em, use_lora, quant):
         load_in_4bit=quant == "4bit", load_in_8bit=quant == "8bit", full_finetuning=not use_lora,
         trust_remote_code=cfg.get("trust_remote_code", False),
     )
-    # Algunos modelos devuelven un processor multimodal; nos quedamos con el tokenizer de texto
+    # Some models return a multimodal processor; we keep the text tokenizer
     tok = getattr(tok, "tokenizer", tok)
     if use_lora:
         tm = cfg.get("target_modules")
@@ -97,12 +97,12 @@ def method_of(cfg) -> str:
 def run(cfg, job_dir, em, stop):
     backend = cfg.get("backend", "hf")
     if backend == "vllm" and method_of(cfg) != "grpo":
-        backend = "hf"  # vLLM sólo acelera la generación de GRPO
+        backend = "hf"  # vLLM only speeds up GRPO generation
     if backend == "vllm" and cfg.get("quantization", "4bit") != "none" and cfg.get("use_lora", True):
-        # vLLM no puede generar con pesos cuantizados por bitsandbytes: LoRA en 16 bits
+        # vLLM can't generate with bitsandbytes-quantized weights: LoRA in 16 bits
         cfg = {**cfg, "quantization": "none"}
     if backend == "unsloth":
-        import unsloth  # noqa: F401  — debe importarse antes que transformers/trl para aplicar sus parches
+        import unsloth  # noqa: F401  — it must be imported before transformers/trl to apply its patches
     import torch
     from datasets import Dataset
     from transformers import TrainerCallback
@@ -114,8 +114,8 @@ def run(cfg, job_dir, em, stop):
     bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
     dtype = torch.bfloat16 if bf16 else torch.float16
 
-    # ---------- Modelo ----------
-    em.status(f"Cargando {cfg['base_model']} con {backend} ({quant}, {'LoRA' if use_lora else 'full fine-tune'})")
+    # ---------- Model ----------
+    em.status(f"Loading {cfg['base_model']} with {backend} ({quant}, {'LoRA' if use_lora else 'full fine-tune'})")
     if backend == "unsloth":
         model, tok, quantized = load_unsloth(cfg, em, use_lora, quant)
     else:
@@ -123,22 +123,22 @@ def run(cfg, job_dir, em, stop):
     if tok.pad_token is None:
         tok.pad_token = tok.eos_token
     if not tok.chat_template and method != "pretrain":
-        em.status("El tokenizer no tiene chat template; usando ChatML")
+        em.status("The tokenizer has no chat template; using ChatML")
         tok.chat_template = CHATML_TEMPLATE
     if use_lora:
         trainable, total = model.get_nb_trainable_parameters()
-        em.status(f"Parámetros entrenables: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)")
+        em.status(f"Trainable parameters: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)")
         em.emit("params", trainable=trainable, total=total)
-    # En unsloth el gradient checkpointing ya lo gestiona get_peft_model
+    # In unsloth, get_peft_model already handles gradient checkpointing
     gc = cfg.get("gradient_checkpointing", True) and backend != "unsloth"
 
     # ---------- Dataset ----------
     rows = load_rows(cfg["dataset_path"])
     fmt = cfg["dataset_format"]
     if method in ("dpo", "orpo", "kto") and fmt != "preference":
-        raise ValueError(f"{method.upper()} necesita un dataset de preferencias (prompt/chosen/rejected)")
+        raise ValueError(f"{method.upper()} needs a preference dataset (prompt/chosen/rejected)")
     if method == "kto":
-        # KTO usa ejemplos sueltos etiquetados como deseables/no deseables
+        # KTO uses standalone examples labelled desirable/undesirable
         rows = [x for r in rows for x in ({"prompt": r["prompt"], "completion": r["chosen"], "label": True},
                                           {"prompt": r["prompt"], "completion": r["rejected"], "label": False})]
     if method == "grpo":
@@ -148,7 +148,7 @@ def run(cfg, job_dir, em, stop):
             pc = [to_prompt_completion(r) for r in rows]
             rows = [{"prompt": x["prompt"], "answer": x["completion"][0]["content"]} for x in pc]
         else:
-            raise ValueError("GRPO necesita prompts con respuesta de referencia (dataset de chat o preferencias)")
+            raise ValueError("GRPO needs prompts with a reference answer (a chat or preference dataset)")
         if cfg.get("grpo_system_prompt"):
             for r in rows:
                 if r["prompt"][0]["role"] != "system":
@@ -168,7 +168,7 @@ def run(cfg, job_dir, em, stop):
     if ratio and len(ds) > 10:
         sp = ds.train_test_split(test_size=ratio, seed=cfg.get("seed", 42))
         ds, eval_ds = sp["train"], sp["test"]
-    em.status(f"Dataset: {len(ds)} ejemplos de entrenamiento" + (f", {len(eval_ds)} de evaluación" if eval_ds else ""))
+    em.status(f"Dataset: {len(ds)} training examples" + (f", {len(eval_ds)} for evaluation" if eval_ds else ""))
 
     # ---------- Callbacks ----------
     class LiveCallback(TrainerCallback):
@@ -200,7 +200,7 @@ def run(cfg, job_dir, em, stop):
         learning_rate=cfg.get("learning_rate", 2e-4),
         lr_scheduler_type=cfg.get("scheduler", "cosine"),
         warmup_ratio=cfg.get("warmup_ratio", 0.03),
-        # transformers>=5: warmup_steps admite float <1 como proporción (warmup_ratio fue retirado)
+        # transformers>=5: warmup_steps accepts a float <1 as a ratio (warmup_ratio was removed)
         warmup_steps=cfg.get("warmup_ratio", 0.03),
         weight_decay=cfg.get("weight_decay", 0.0),
         optim=cfg.get("optim", "paged_adamw_8bit" if quantized else "adamw_torch"),
@@ -229,7 +229,7 @@ def run(cfg, job_dir, em, stop):
 
         from .rewards import build as build_rewards
         ng = cfg.get("num_generations", 4)
-        # El lote efectivo debe ser múltiplo del nº de generaciones por prompt
+        # The effective batch must be a multiple of the number of generations per prompt
         common["per_device_train_batch_size"] = max(common["per_device_train_batch_size"], ng)
         args = GRPOConfig(**filter_kwargs(GRPOConfig, {
             **common, "num_generations": ng, "max_completion_length": cfg.get("max_completion_length", 256),
@@ -237,15 +237,15 @@ def run(cfg, job_dir, em, stop):
             "temperature": cfg.get("grpo_temperature", 0.9), "loss_type": cfg.get("grpo_loss", "dapo"),
             "generation_batch_size": common["per_device_train_batch_size"] * common["gradient_accumulation_steps"],
             "log_completions": False,
-            # vLLM en modo «colocate»: comparte GPU con el entrenamiento y genera mucho más rápido
+            # vLLM in “colocate” mode: shares the GPU with training and generates much faster
             "use_vllm": backend == "vllm", "vllm_mode": "colocate",
             "vllm_gpu_memory_utilization": cfg.get("vllm_gpu_util", 0.25),
-            # Limitamos el contexto de vLLM a lo que realmente usamos: si no, reserva caché para el
-            # contexto máximo del modelo (p. ej. 40k tokens) y no cabe
+            # We cap vLLM's context to what we actually use: otherwise it reserves cache for the
+            # model's maximum context (e.g. 40k tokens) and doesn't fit
             "vllm_max_model_length": cfg.get("max_seq_len", 1024) + cfg.get("max_completion_length", 256),
         }))
         if backend == "vllm":
-            em.status(f"Generación con vLLM (colocate, {cfg.get('vllm_gpu_util', 0.25) * 100:.0f}% de la VRAM)")
+            em.status(f"Generating with vLLM (colocate, {cfg.get('vllm_gpu_util', 0.25) * 100:.0f}% of VRAM)")
         trainer = GRPOTrainer(model=model, reward_funcs=build_rewards(cfg), args=args, train_dataset=ds,
                               processing_class=tok, callbacks=[LiveCallback()])
     elif method == "orpo":
@@ -285,13 +285,13 @@ def run(cfg, job_dir, em, stop):
         trainer = SFTTrainer(model=model, args=args, train_dataset=ds, eval_dataset=eval_ds, processing_class=tok,
                              callbacks=[LiveCallback()])
 
-    em.status("Entrenando…")
+    em.status("Training…")
     resume = cfg.get("resume_from_checkpoint") or None
     result = trainer.train(resume_from_checkpoint=resume)
     em.emit("train_result", **{k: v for k, v in result.metrics.items() if isinstance(v, (int, float))})
 
     final_dir = os.path.join(out_dir, "final")
-    em.status(f"Guardando en {final_dir}")
+    em.status(f"Saving to {final_dir}")
     trainer.save_model(final_dir)
     tok.save_pretrained(final_dir)
     with open(os.path.join(final_dir, "llmtrainer.json"), "w") as f:
@@ -304,7 +304,7 @@ def run(cfg, job_dir, em, stop):
         from .export import merge_lora
 
         merged = os.path.join(out_dir, "merged")
-        em.status("Fusionando LoRA con el modelo base…")
+        em.status("Merging LoRA with the base model…")
         merge_lora(cfg["base_model"], final_dir, merged, trust_remote_code=cfg.get("trust_remote_code", False))
         em.emit("merged", path=merged)
 

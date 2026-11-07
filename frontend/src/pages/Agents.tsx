@@ -9,47 +9,47 @@ type ToolSpec = { id: string; label: string; desc: string; icon: string; functio
 type Agent = { id: number; name: string; description: string; model_id: number | null; helper?: number | null; system_prompt: string;
   tools: { id: string; config: Record<string, any> }[]; max_steps: number; max_tokens: number; temperature: number };
 
-const EMPTY: Omit<Agent, "id"> = { name: "", description: "", model_id: null, helper: null, system_prompt: "Eres un asistente útil. Usa las herramientas disponibles cuando aporten información que no tienes.", tools: [], max_steps: 5, max_tokens: 700, temperature: 0.3 };
+const EMPTY: Omit<Agent, "id"> = { name: "", description: "", model_id: null, helper: null, system_prompt: "You are a helpful assistant. Use the available tools when they provide information you don't have.", tools: [], max_steps: 5, max_tokens: 700, temperature: 0.3 };
 
 export default function Agents() {
   const [list, reload] = useData<Agent[]>("/api/agents");
   const [sel, setSel] = useState<number | "new">("new");
   const current = sel === "new" ? null : list?.find((a) => a.id === sel);
-  const [importar, setImportar] = useState(false);
+  const [importing, setImporting] = useState(false);
   return (
     <>
       <div className="page-head">
-        <div><h1>Agentes</h1><div className="sub">Un modelo + las herramientas que elijas: buscar en tus documentos, en la web, ejecutar código, leer archivos o cualquier servidor MCP</div></div>
+        <div><h1>Agents</h1><div className="sub">A model + the tools you choose: search your documents or the web, run code, read files or use any MCP server</div></div>
         <div className="row" style={{ gap: 8 }}>
-          <button onClick={() => setImportar(true)}>Importar de CrewAI</button>
-          <button className="primary" onClick={() => setSel("new")}><Plus size={14} /> Nuevo agente</button>
+          <button onClick={() => setImporting(true)}>Import from CrewAI</button>
+          <button className="primary" onClick={() => setSel("new")}><Plus size={14} /> New agent</button>
         </div>
       </div>
-      <Help title="¿Qué es un agente?">
-        <p>Un agente es <b>un modelo que puede usar herramientas</b>. En vez de responder de memoria, decide llamar a una herramienta (buscar en tus documentos, buscar en la web, calcular…), lee el resultado y sigue hasta darte la respuesta.</p>
+      <Help title="What is an agent?">
+        <p>An agent is <b>a model that can use tools</b>. Instead of answering from memory, it decides to call a tool (search your documents, search the web, calculate…), reads the result and keeps going until it has your answer.</p>
         <ul>
-          <li>Creas un perfil: <b>modelo + instrucciones + herramientas marcadas</b>. Cada herramienta tiene sus propios ajustes.</li>
-          <li><b>Pasos máximos</b> limita cuántas veces puede llamar a herramientas antes de responder.</li>
-          <li>Con <b>Servidor MCP externo</b> añades de golpe las herramientas de cualquier servidor compatible.</li>
-          <li>Abajo tienes un panel para probarlo: verás cada llamada, sus argumentos y el resultado.</li>
+          <li>You create a profile: <b>model + instructions + ticked tools</b>. Each tool has its own settings.</li>
+          <li><b>Max steps</b> limits how many times it can call tools before answering.</li>
+          <li>With <b>External MCP server</b> you add all the tools of any compatible server at once.</li>
+          <li>Below there's a panel to try it: you'll see every call, its arguments and the result.</li>
         </ul>
-        <p style={{ marginTop: 8 }}>La herramienta <b>Ejecutar Python</b> corre aislada con bubblewrap: el código no ve tus archivos ni el proyecto, no tiene red salvo que la actives, y se le aplican límites de memoria y tiempo. Puedes darle una carpeta de datos en sólo lectura (aparece dentro como <code>/datos</code>).</p>
-        <p style={{ marginTop: 8 }}>Con modelos pequeños (menos de 7B) los agentes se equivocan a menudo al elegir herramienta o al leer el resultado.</p>
+        <p style={{ marginTop: 8 }}>The <b>Run Python</b> tool runs sandboxed with bubblewrap: the code can't see your files or the project, has no network unless you enable it, and gets memory and time limits. You can give it a read-only data folder (it shows up inside as <code>/data</code>).</p>
+        <p style={{ marginTop: 8 }}>With small models (under 7B) agents often get it wrong when choosing a tool or reading the result.</p>
       </Help>
       <div className="split" style={{ gridTemplateColumns: "230px minmax(0,1fr)" }}>
         <div className="card" style={{ padding: 8 }}>
-          {!list?.length && <div className="empty" style={{ fontSize: 13 }}>Sin agentes</div>}
+          {!list?.length && <div className="empty" style={{ fontSize: 13 }}>No agents</div>}
           <table><tbody>
             {list?.map((a) => (
               <tr key={a.id} className={`clickable ${sel === a.id ? "selected" : ""}`} onClick={() => setSel(a.id)}>
-                <td><b>{a.name}</b><div className="sub" style={{ fontSize: 12 }}>{a.tools.length} herramienta(s)</div></td>
+                <td><b>{a.name}</b><div className="sub" style={{ fontSize: 12 }}>{a.tools.length} tool(s)</div></td>
               </tr>
             ))}
           </tbody></table>
         </div>
         <Editor key={sel} agent={current} onSaved={(a) => { reload(); setSel(a.id); }} onDeleted={() => { reload(); setSel("new"); }} />
       </div>
-      {importar && <ImportarCrew onClose={() => setImportar(false)} onDone={() => { setImportar(false); reload(); }} />}
+      {importing && <ImportCrew onClose={() => setImporting(false)} onDone={() => { setImporting(false); reload(); }} />}
     </>
   );
 }
@@ -75,11 +75,11 @@ function Editor({ agent, onSaved, onDeleted }: { agent: Agent | null | undefined
   const save = async () => {
     try {
       const saved = agent ? await api.put<Agent>(`/api/agents/${agent.id}`, f) : await api.post<Agent>("/api/agents", f);
-      setDirty(false); notify("Agente guardado"); onSaved(saved);
+      setDirty(false); notify("Agent saved"); onSaved(saved);
     } catch (e: any) { notify(e.message, "err"); }
   };
   const del = async () => {
-    if (!agent || !(await confirm(`¿Borrar el agente «${agent.name}»?`, undefined, { label: "Borrar" }))) return;
+    if (!agent || !(await confirm(`Delete the agent “${agent.name}”?`, undefined, { label: "Delete" }))) return;
     await api.del(`/api/agents/${agent.id}`); onDeleted();
   };
 
@@ -87,35 +87,35 @@ function Editor({ agent, onSaved, onDeleted }: { agent: Agent | null | undefined
     <div className="stack" style={{ gap: 16 }}>
       <div className="card stack">
         <div className="row between">
-          <h2 style={{ margin: 0 }}>{agent ? agent.name : "Nuevo agente"}</h2>
+          <h2 style={{ margin: 0 }}>{agent ? agent.name : "New agent"}</h2>
           <div className="row">
             {agent && <button className="danger" onClick={del}><Trash2 size={14} /></button>}
-            <button className="primary" disabled={!f.name || !dirty} onClick={save}><Save size={14} /> Guardar</button>
+            <button className="primary" disabled={!f.name || !dirty} onClick={save}><Save size={14} /> Save</button>
           </div>
         </div>
         <div className="grid g2">
-          <Field label="Nombre"><input value={f.name} onChange={(e) => set({ name: e.target.value })} placeholder="investigador" /></Field>
-          <Field label="Modelo" hint="Se carga automáticamente al ejecutar el agente">
+          <Field label="Name"><input value={f.name} onChange={(e) => set({ name: e.target.value })} placeholder="researcher" /></Field>
+          <Field label="Model" hint="Loaded automatically when the agent runs">
             <select value={f.model_id ?? ""} onChange={(e) => set({ model_id: e.target.value ? +e.target.value : null })}>
-              <option value="">El que esté cargado</option>
+              <option value="">Whichever is loaded</option>
               {models?.filter((m) => m.kind !== "embedding").map((m) => <option key={m.id} value={m.id}>{m.name} [{m.kind}]</option>)}
             </select>
           </Field>
         </div>
-        <Field label="Instrucciones (system prompt)"><textarea rows={3} value={f.system_prompt} onChange={(e) => set({ system_prompt: e.target.value })} /></Field>
+        <Field label="Instructions (system prompt)"><textarea rows={3} value={f.system_prompt} onChange={(e) => set({ system_prompt: e.target.value })} /></Field>
         <div className="grid g3">
-          <Field label={`Pasos máximos: ${f.max_steps}`} hint="Cada paso = una respuesta del modelo (puede llamar a herramientas)"><input type="range" min={1} max={12} value={f.max_steps} onChange={(e) => set({ max_steps: +e.target.value })} /></Field>
+          <Field label={`Max steps: ${f.max_steps}`} hint="Each step = one model reply (it may call tools)"><input type="range" min={1} max={12} value={f.max_steps} onChange={(e) => set({ max_steps: +e.target.value })} /></Field>
           <HelperPicker value={f.helper ?? null} onChange={(helper) => set({ helper })}
-            hint="Con un ayudante externo el agente no usa la GPU. A cambio pierde el tool-calling nativo: las herramientas se describen en el prompt." />
+            hint="With an external helper the agent doesn't use the GPU. In exchange it loses native tool calling: the tools are described in the prompt." />
           <Adv>
-            <Field label={`Temperatura: ${f.temperature}`}><input type="range" min={0} max={1.5} step={0.05} value={f.temperature} onChange={(e) => set({ temperature: +e.target.value })} /></Field>
-            <Field label={`Máx. tokens por paso: ${f.max_tokens}`}><input type="range" min={128} max={2048} step={64} value={f.max_tokens} onChange={(e) => set({ max_tokens: +e.target.value })} /></Field>
+            <Field label={`Temperature: ${f.temperature}`}><input type="range" min={0} max={1.5} step={0.05} value={f.temperature} onChange={(e) => set({ temperature: +e.target.value })} /></Field>
+            <Field label={`Max tokens per step: ${f.max_tokens}`}><input type="range" min={128} max={2048} step={64} value={f.max_tokens} onChange={(e) => set({ max_tokens: +e.target.value })} /></Field>
           </Adv>
         </div>
       </div>
 
       <div className="card">
-        <div className="row between"><h3 style={{ margin: 0 }}><Wrench size={15} /> Herramientas</h3><span className="sub">{f.tools.length} activas</span></div>
+        <div className="row between"><h3 style={{ margin: 0 }}><Wrench size={15} /> Tools</h3><span className="sub">{f.tools.length} enabled</span></div>
         <div className="grid g2" style={{ marginTop: 10 }}>
           {catalog?.map((spec) => {
             const on = selected(spec.id);
@@ -150,7 +150,7 @@ function ConfigField({ c, value, onChange, cols }: { c: any; value: any; onChang
   const common = { value: value ?? c.default ?? "", onChange: (e: any) => onChange(c.type === "number" ? +e.target.value : e.target.value) };
   if (c.type === "collection")
     return <Field label={c.label}><select value={value ?? ""} onChange={(e) => onChange(e.target.value ? +e.target.value : null)}>
-      <option value="">— elige —</option>{cols.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field>;
+      <option value="">— choose —</option>{cols.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></Field>;
   if (c.type === "mcp_server")
     return <McpServerSelect label={c.label} value={value} onChange={onChange} />;
   if (c.type === "select")
@@ -158,8 +158,8 @@ function ConfigField({ c, value, onChange, cols }: { c: any; value: any; onChang
   if (c.type === "bool")
     return <label className="check"><input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked)} /> {c.label}</label>;
   if (c.type === "tags")
-    return <Field label={c.label} hint="separadas por comas"><input value={(value ?? []).join(", ")} onChange={(e) => onChange(e.target.value.split(",").map((x: string) => x.trim()).filter(Boolean))} /></Field>;
-  return <Field label={c.label} hint={c.type === "path" ? "El agente no puede salir de esta carpeta" : undefined}>
+    return <Field label={c.label} hint="comma-separated"><input value={(value ?? []).join(", ")} onChange={(e) => onChange(e.target.value.split(",").map((x: string) => x.trim()).filter(Boolean))} /></Field>;
+  return <Field label={c.label} hint={c.type === "path" ? "The agent can't leave this folder" : undefined}>
     <input type={c.type === "number" ? "number" : "text"} placeholder={c.placeholder} {...common} /></Field>;
 }
 
@@ -170,12 +170,12 @@ function McpProbe({ url }: { url: string }) {
     setBusy(true);
     try {
       const r = await api.post<any>("/api/agents/tools/mcp/probe", { url });
-      setRes(`${r.tools.length} herramientas: ${r.tools.map((t: any) => t.name).join(", ")}`);
+      setRes(`${r.tools.length} tools: ${r.tools.map((t: any) => t.name).join(", ")}`);
     } catch (e: any) { setRes(e.message); } finally { setBusy(false); }
   };
   return (
     <div className="row">
-      <button className="sm" disabled={!url || busy} onClick={probe}>{busy ? <Spinner /> : <Plug size={12} />} Probar conexión</button>
+      <button className="sm" disabled={!url || busy} onClick={probe}>{busy ? <Spinner /> : <Plug size={12} />} Test connection</button>
       {res && <span className="sub" style={{ fontSize: 12 }}>{res}</span>}
     </div>
   );
@@ -215,28 +215,28 @@ function TestPanel({ agent, dirty }: { agent: Agent; dirty: boolean }) {
   return (
     <div className="card stack">
       <div className="row between">
-        <h3 style={{ margin: 0 }}><Bot size={15} /> Probar agente</h3>
-        {toolsEv && <span className="sub" style={{ fontSize: 12 }}>{toolsEv.tools.length} herramientas cargadas · {toolsEv.native ? "tool-calling nativo" : "instrucciones en el prompt"}</span>}
+        <h3 style={{ margin: 0 }}><Bot size={15} /> Try the agent</h3>
+        {toolsEv && <span className="sub" style={{ fontSize: 12 }}>{toolsEv.tools.length} tools loaded · {toolsEv.native ? "native tool calling" : "instructions in the prompt"}</span>}
       </div>
-      {dirty && <div className="sub">Guarda los cambios para probarlos.</div>}
+      {dirty && <div className="sub">Save your changes to try them.</div>}
       <div className="row" style={{ flexWrap: "nowrap" }}>
         <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder="Escribe una petición para el agente…" />
+          placeholder="Write a request for the agent…" />
         {busy ? <button onClick={() => abort.ctrl?.abort()}><Square size={14} /></button>
           : <button className="primary" onClick={send} disabled={!input.trim()}><Send size={14} /></button>}
       </div>
-      {history.length > 0 && <div className="sub" style={{ fontSize: 12 }}>Turnos en el contexto: {history.length} · <button className="ghost sm" onClick={() => { setHistory([]); setEvents([]); setAnswer(""); }}>reiniciar</button></div>}
+      {history.length > 0 && <div className="sub" style={{ fontSize: 12 }}>Turns in context: {history.length} · <button className="ghost sm" onClick={() => { setHistory([]); setEvents([]); setAnswer(""); }}>reset</button></div>}
       {calls.length > 0 && (
         <div className="stack" style={{ gap: 4 }}>
           {calls.map((e, i) => e.type === "tool_call" ? (
             <div key={i} className="row" style={{ gap: 6 }}>
               <ChevronRight size={13} /><b>{e.name}</b>
               <code style={{ fontSize: 12 }}>{JSON.stringify(e.arguments).slice(0, 120)}</code>
-              {!e.known && <span className="badge err">no existe</span>}
+              {!e.known && <span className="badge err">doesn't exist</span>}
             </div>
           ) : (
             <details key={i} className="source" style={{ fontSize: 12.5 }}>
-              <summary className="sub">resultado de {e.name} · {e.seconds}s · {e.result.length} caracteres</summary>
+              <summary className="sub">result of {e.name} · {e.seconds}s · {e.result.length} characters</summary>
               <div style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>{e.result.slice(0, 2000)}</div>
             </details>
           ))}
@@ -245,58 +245,58 @@ function TestPanel({ agent, dirty }: { agent: Agent; dirty: boolean }) {
       {(answer || busy) && (
         <div className="msg assistant" style={{ maxWidth: "100%" }}>
           {answer ? <AssistantText text={answer} /> : <Spinner />}
-          {done && <div className="meta">{done.steps} paso(s){done.limit_reached ? " · límite alcanzado" : ""}</div>}
+          {done && <div className="meta">{done.steps} step(s){done.limit_reached ? " · limit reached" : ""}</div>}
         </div>
       )}
-      {!events.length && !busy && <div className="sub" style={{ fontSize: 12 }}>Ejemplos: «busca en mis documentos cuánto dura la garantía», «busca en la web el precio actual del litio y calcula el coste de 300 kg», «lista los archivos y resume el más reciente».</div>}
+      {!events.length && !busy && <div className="sub" style={{ fontSize: 12 }}>Examples: “search my documents for how long the warranty lasts”, “look up the current price of lithium on the web and work out the cost of 300 kg”, “list the files and summarize the most recent one”.</div>}
     </div>
   );
 }
 
-/** Desplegable con los servidores MCP registrados en Conexiones. */
+/** Dropdown with the MCP servers registered under Connections. */
 function McpServerSelect({ label, value, onChange }: { label: string; value: any; onChange: (v: any) => void }) {
-  const [lista] = useData<{ id: number; name: string; transport: string; enabled: boolean }[]>("/api/connections/mcp-servers");
+  const [list] = useData<{ id: number; name: string; transport: string; enabled: boolean }[]>("/api/connections/mcp-servers");
   return (
-    <Field label={label} hint={lista?.length ? "Se registran en Conexiones" : "Aún no hay ninguno: añádelos en Conexiones"}>
+    <Field label={label} hint={list?.length ? "They're registered under Connections" : "None yet: add them under Connections"}>
       <select value={value ?? ""} onChange={(e) => onChange(e.target.value ? +e.target.value : null)}>
-        <option value="">— elige —</option>
-        {lista?.filter((m) => m.enabled).map((m) => <option key={m.id} value={m.id}>{m.name} ({m.transport})</option>)}
+        <option value="">— choose —</option>
+        {list?.filter((m) => m.enabled).map((m) => <option key={m.id} value={m.id}>{m.name} ({m.transport})</option>)}
       </select>
     </Field>
   );
 }
 
-const EJEMPLO_CASOS = `¿Cuál es el plazo de devolución? | rag_search | 30
-¿Cuánto es 1234 por 56? | calculator | 69104
-Hola, ¿qué tal? | ninguna`;
+const EXAMPLE_CASES = `What is the return period? | rag_search | 30
+What is 1234 times 56? | calculator | 69104
+Hi, how are you? | none`;
 
-/** ¿Elige la herramienta correcta? Casos de prueba con la herramienta esperada y palabras clave. */
+/** Does it pick the right tool? Test cases with the expected tool and keywords. */
 function EvalPanel({ agent, dirty }: { agent: Agent; dirty: boolean }) {
-  const [txt, setTxt] = useState(EJEMPLO_CASOS);
+  const [txt, setTxt] = useState(EXAMPLE_CASES);
   const [runs, reload] = useData<any[]>(`/api/agents/${agent.id}/evals`);
-  const [abierto, setAbierto] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const { track, notify } = useToast();
 
-  const casos = txt.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
-    const [question, tool = "", claves = ""] = l.split("|").map((x) => x.trim());
-    return { question, tool, keywords: claves.split(",").map((x) => x.trim()).filter(Boolean) };
+  const cases = txt.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
+    const [question, tool = "", kw = ""] = l.split("|").map((x) => x.trim());
+    return { question, tool, keywords: kw.split(",").map((x) => x.trim()).filter(Boolean) };
   });
-  const ultimo = runs?.[0];
+  const latest = runs?.[0];
 
-  const lanzar = async () => {
-    if (dirty) return notify("Guarda el agente antes de evaluarlo", "err");
+  const launch = async () => {
+    if (dirty) return notify("Save the agent before evaluating it", "err");
     try {
-      const r = await api.post<any>(`/api/agents/${agent.id}/eval`, { name: "", cases: casos });
+      const r = await api.post<any>(`/api/agents/${agent.id}/eval`, { name: "", cases: cases });
       track(r.task, () => reload());
     } catch (e: any) { notify(e.message, "err"); }
   };
 
-  if (!abierto) {
+  if (!expanded) {
     return (
       <div className="card" style={{ padding: "8px 12px" }}>
-        <button className="ghost sm" onClick={() => setAbierto(true)}>
-          Evaluar el agente · ¿elige la herramienta correcta?
-          {ultimo?.summary?.casos ? ` — última: ${Math.round(ultimo.summary.herramienta_correcta * 100)}%` : ""}
+        <button className="ghost sm" onClick={() => setExpanded(true)}>
+          Evaluate the agent · does it pick the right tool?
+          {latest?.summary?.casos ? ` — latest: ${Math.round(latest.summary.herramienta_correcta * 100)}%` : ""}
         </button>
       </div>
     );
@@ -304,95 +304,95 @@ function EvalPanel({ agent, dirty }: { agent: Agent; dirty: boolean }) {
   return (
     <div className="card stack">
       <div className="row between">
-        <b>Evaluar el agente</b>
-        <button className="sm ghost" onClick={() => setAbierto(false)}>Cerrar</button>
+        <b>Evaluate the agent</b>
+        <button className="sm ghost" onClick={() => setExpanded(false)}>Close</button>
       </div>
       <div className="sub">
-        Con modelos pequeños lo que falla no suele ser el texto, sino la <b>decisión de qué herramienta usar</b>.
-        Escribe preguntas con la herramienta que debería elegir y mide cuántas acierta. Cambiar el modelo, las
-        instrucciones o quitar herramientas y volver a medir es la forma de mejorar un agente sin ir a ciegas.
+        With small models what fails usually isn't the text but the <b>decision about which tool to use</b>.
+        Write questions with the tool it should pick and measure how many it gets right. Changing the model, the
+        instructions or removing tools and measuring again is how you improve an agent without flying blind.
       </div>
-      <Field label={`Casos (${casos.length})`}
-        hint={`Uno por línea: pregunta | herramienta esperada | palabras clave. Herramientas de este agente: ${agent.tools.map((t) => t.id).join(", ") || "ninguna"}, o «ninguna».`}>
+      <Field label={`Cases (${cases.length})`}
+        hint={`One per line: question | expected tool | keywords. This agent's tools: ${agent.tools.map((t) => t.id).join(", ") || "none"}, or “none”.`}>
         <textarea rows={6} className="mono" value={txt} onChange={(e) => setTxt(e.target.value)} />
       </Field>
       <div className="row end">
-        <button className="primary" disabled={!casos.length} onClick={lanzar}>Evaluar {casos.length} casos</button>
+        <button className="primary" disabled={!cases.length} onClick={launch}>Evaluate {cases.length} cases</button>
       </div>
 
-      {ultimo?.results?.length > 0 && (<>
+      {latest?.results?.length > 0 && (<>
         <div className="row" style={{ gap: 18, flexWrap: "wrap" }}>
-          <Metrica titulo="Herramienta correcta" valor={`${Math.round(ultimo.summary.herramienta_correcta * 100)}%`} />
-          <Metrica titulo="A la primera" valor={`${Math.round(ultimo.summary.a_la_primera * 100)}%`} />
-          {ultimo.summary.palabras_clave != null && <Metrica titulo="Palabras clave" valor={`${Math.round(ultimo.summary.palabras_clave * 100)}%`} />}
-          <Metrica titulo="Pasos" valor={ultimo.summary.pasos_media} />
-          <Metrica titulo="Por caso" valor={`${ultimo.summary.segundos_media}s`} />
+          <Metric title="Right tool" value={`${Math.round(latest.summary.herramienta_correcta * 100)}%`} />
+          <Metric title="First try" value={`${Math.round(latest.summary.a_la_primera * 100)}%`} />
+          {latest.summary.palabras_clave != null && <Metric title="Keywords" value={`${Math.round(latest.summary.palabras_clave * 100)}%`} />}
+          <Metric title="Steps" value={latest.summary.pasos_media} />
+          <Metric title="Per case" value={`${latest.summary.segundos_media}s`} />
         </div>
-        {!!ultimo.summary.fallos_frecuentes?.length && (
+        {!!latest.summary.fallos_frecuentes?.length && (
           <div className="warn">
-            <b>Fallos que se repiten:</b>
-            {ultimo.summary.fallos_frecuentes.map(([k, n]: [string, number]) => <div key={k}>{k} ×{n}</div>)}
+            <b>Recurring failures:</b>
+            {latest.summary.fallos_frecuentes.map(([k, n]: [string, number]) => <div key={k}>{k} ×{n}</div>)}
           </div>
         )}
         <table>
-          <thead><tr><th /><th>Pregunta</th><th>Esperaba</th><th>Usó</th><th>Pasos</th></tr></thead>
+          <thead><tr><th /><th>Question</th><th>Expected</th><th>Used</th><th>Steps</th></tr></thead>
           <tbody>
-            {ultimo.results.map((f: any, i: number) => (
+            {latest.results.map((f: any, i: number) => (
               <tr key={i} title={f.respuesta}>
                 <td>{f.acierto ? "✓" : "✗"}</td>
                 <td>{f.question}</td>
                 <td className="mono sub">{f.esperada}</td>
-                <td className="mono sub" style={{ color: f.acierto ? undefined : "var(--err)" }}>{f.llamadas.join(", ") || "ninguna"}</td>
+                <td className="mono sub" style={{ color: f.acierto ? undefined : "var(--err)" }}>{f.llamadas.join(", ") || "none"}</td>
                 <td className="sub">{f.pasos}</td>
               </tr>
             ))}
           </tbody>
         </table>
         {runs && runs.length > 1 && (
-          <div className="sub">Historial: {runs.slice(0, 6).map((r) => `${Math.round((r.summary?.herramienta_correcta ?? 0) * 100)}%`).join(" · ")}</div>
+          <div className="sub">History: {runs.slice(0, 6).map((r) => `${Math.round((r.summary?.herramienta_correcta ?? 0) * 100)}%`).join(" · ")}</div>
         )}
       </>)}
     </div>
   );
 }
 
-const Metrica = ({ titulo, valor }: { titulo: string; valor: any }) => (
-  <div><div className="sub" style={{ fontSize: 11 }}>{titulo}</div><div style={{ fontSize: 20, fontWeight: 600 }}>{valor}</div></div>
+const Metric = ({ title, value }: { title: string; value: any }) => (
+  <div><div className="sub" style={{ fontSize: 11 }}>{title}</div><div style={{ fontSize: 20, fontWeight: 600 }}>{value}</div></div>
 );
 
-/** Importa agentes de un agents.yaml de CrewAI. Los roles pasan tal cual; las herramientas, sólo si hay equivalente. */
-function ImportarCrew({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+/** Imports agents from a CrewAI agents.yaml. Roles carry over as they are; tools only when there's an equivalent. */
+function ImportCrew({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [txt, setTxt] = useState("");
   const [res, setRes] = useState<any>(null);
   const [models] = useData<Model[]>("/api/models");
-  const [modelo, setModelo] = useState<number | "">("");
+  const [model, setModel] = useState<number | "">("");
   const { notify } = useToast();
   const go = async () => {
-    try { setRes(await api.post("/api/agents/import/crewai", { yaml: txt, model_id: modelo || null })); }
+    try { setRes(await api.post("/api/agents/import/crewai", { yaml: txt, model_id: model || null })); }
     catch (e: any) { notify(e.message, "err"); }
   };
   return (
-    <Modal title="Importar agentes de CrewAI" onClose={res ? onDone : onClose} wide>
+    <Modal title="Import agents from CrewAI" onClose={res ? onDone : onClose} wide>
       {!res ? (<>
         <p className="sub">
-          Pega el contenido de un <code>agents.yaml</code> de CrewAI. El rol, el objetivo y el trasfondo se convierten en
-          las instrucciones del agente. Sus herramientas son código de CrewAI y no se pueden traer: se traducen las que
-          tienen equivalente aquí (búsqueda web, leer y escribir archivos, Python, SQL, documentos) y del resto se avisa.
+          Paste the contents of a CrewAI <code>agents.yaml</code>. The role, goal and backstory become
+          the agent's instructions. Its tools are CrewAI code and can't be brought over: the ones with an
+          equivalent here are translated (web search, reading and writing files, Python, SQL, documents) and you're warned about the rest.
         </p>
         <Field label="agents.yaml"><textarea rows={12} className="mono" value={txt} onChange={(e) => setTxt(e.target.value)}
-          placeholder={"researcher:\n  role: Investigador senior\n  goal: Encontrar lo último sobre {topic}\n  backstory: Llevas años…\n  tools:\n    - SerperDevTool"} /></Field>
-        <Field label="Modelo para los agentes importados">
-          <select value={modelo} onChange={(e) => setModelo(e.target.value ? +e.target.value : "")}>
-            <option value="">el que esté cargado</option>
+          placeholder={"researcher:\n  role: Senior researcher\n  goal: Find the latest on {topic}\n  backstory: You've spent years…\n  tools:\n    - SerperDevTool"} /></Field>
+        <Field label="Model for the imported agents">
+          <select value={model} onChange={(e) => setModel(e.target.value ? +e.target.value : "")}>
+            <option value="">whichever is loaded</option>
             {models?.filter((m) => m.kind !== "embedding").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select>
         </Field>
-        <div className="row end"><button onClick={onClose}>Cancelar</button><button className="primary" disabled={!txt.trim()} onClick={go}>Importar</button></div>
+        <div className="row end"><button onClick={onClose}>Cancel</button><button className="primary" disabled={!txt.trim()} onClick={go}>Import</button></div>
       </>) : (<>
-        <p><b>{res.creados.length} agente(s) creados:</b></p>
-        {res.creados.map((a: any) => <div key={a.id}>· {a.name} <span className="sub">{a.tools.join(", ") || "sin herramientas"}</span></div>)}
+        <p><b>{res.creados.length} agent(s) created:</b></p>
+        {res.creados.map((a: any) => <div key={a.id}>· {a.name} <span className="sub">{a.tools.join(", ") || "no tools"}</span></div>)}
         {!!res.avisos.length && <div className="warn" style={{ marginTop: 10 }}>{res.avisos.map((w: string, i: number) => <div key={i}>⚠ {w}</div>)}</div>}
-        <div className="row end" style={{ marginTop: 10 }}><button className="primary" onClick={onDone}>Hecho</button></div>
+        <div className="row end" style={{ marginTop: 10 }}><button className="primary" onClick={onDone}>Done</button></div>
       </>)}
     </Modal>
   );

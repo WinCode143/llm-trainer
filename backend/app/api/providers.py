@@ -1,4 +1,4 @@
-"""Modelos ayudantes: alta, prueba y listado de modelos remotos."""
+"""Helper models: adding, testing and listing remote models."""
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -11,13 +11,13 @@ router = APIRouter(prefix="/api/providers", tags=["providers"])
 
 @router.get("/presets")
 def presets():
-    """Atajos de configuración y familias disponibles."""
+    """Configuration presets and available families."""
     return {"presets": svc.PRESETS, "kinds": svc.KINDS}
 
 
 @router.get("")
 def listing():
-    """Proveedores configurados. Las claves vuelven enmascaradas."""
+    """Configured providers. Keys come back masked."""
     return svc.listing()
 
 
@@ -34,7 +34,7 @@ class ProviderBody(BaseModel):
 @router.post("")
 def create(body: ProviderBody, s: Session = Depends(get_session)):
     if s.exec(select(Provider).where(Provider.name == body.name)).first():
-        raise HTTPException(409, "Ya existe un ayudante con ese nombre")
+        raise HTTPException(409, "There's already a helper with that name")
     p = Provider(**body.model_dump())
     s.add(p)
     s.commit()
@@ -48,7 +48,7 @@ def update(pid: int, body: ProviderBody, s: Session = Depends(get_session)):
     if not p:
         raise HTTPException(404)
     data = body.model_dump()
-    # Si la interfaz devuelve la clave enmascarada («…abcd») es que no la han tocado: se conserva
+    # If the interface sends back the masked key (“…abcd”), it wasn't touched: the existing one is kept
     if not data["api_key"] or data["api_key"].startswith("…"):
         data.pop("api_key")
     for k, v in data.items():
@@ -82,16 +82,16 @@ def models(pid: int, s: Session = Depends(get_session)):
         raise HTTPException(404)
     try:
         return {"models": svc.remote_models(p)}
-    except Exception as e:  # noqa: BLE001  — muchos servidores no exponen /models
+    except Exception as e:  # noqa: BLE001  — many servers don't expose /models
         return {"models": [], "error": str(e)[:300]}
 
 
 @router.get("/choices")
 def choices():
-    """Opciones para los desplegables de «modelo ayudante» repartidos por la interfaz."""
+    """Options for the “helper model” dropdowns spread across the interface."""
     from ..services.inference import manager
     local = manager.current.name if manager.current else None
-    out = [{"id": None, "label": f"Modelo local ({local})" if local else "Modelo local (ninguno cargado)",
+    out = [{"id": None, "label": f"Local model ({local})" if local else "Local model (none loaded)",
             "ready": bool(local)}]
     for p in svc.listing():
         if p["enabled"]:

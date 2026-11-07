@@ -1,4 +1,4 @@
-"""Cola de trabajos de GPU (entrenamiento/exportación) ejecutados como subprocesos aislados."""
+"""GPU job queue (training/export), run as isolated subprocesses."""
 import json
 import os
 import signal
@@ -33,13 +33,13 @@ def _python_for(job: Job) -> str:
     if entry:
         py, script = entry
         if not py.exists():
-            raise RuntimeError(f"Motor '{job.config['backend']}' no instalado: ejecuta {script}")
+            raise RuntimeError(f"Engine '{job.config['backend']}' isn't installed: run {script}")
         return str(py)
     return sys.executable
 
 _procs: dict[int, subprocess.Popen] = {}
 _wake = threading.Event()
-_before_gpu_job = []  # callbacks (p. ej. descargar el modelo de inferencia para liberar VRAM)
+_before_gpu_job = []  # callbacks (e.g. unload the inference model to free VRAM)
 
 
 def on_before_gpu_job(fn):
@@ -51,21 +51,21 @@ def job_dir(job_id: int) -> Path:
 
 
 def read_events(job_id: int, offset: int = 0) -> tuple[list[dict], int]:
-    """Devuelve eventos a partir de un offset en bytes, y el nuevo offset."""
+    """Returns events from a byte offset, and the new offset."""
     p = job_dir(job_id) / "events.jsonl"
     if not p.exists():
         return [], offset
     with p.open("rb") as f:
         f.seek(offset)
         data = f.read()
-    # Sólo líneas completas
+    # Complete lines only
     end = data.rfind(b"\n") + 1
     events = [json.loads(l) for l in data[:end].splitlines() if l.strip()]
     return events, offset + end
 
 
 def last_progress(job_id: int) -> dict | None:
-    """Último evento de progreso (lee sólo la cola del archivo; barato para listados)."""
+    """The last progress event (reads only the file's tail; cheap for lists)."""
     p = job_dir(job_id) / "events.jsonl"
     if not p.exists():
         return None
@@ -115,7 +115,7 @@ def cancel(job_id: int) -> None:
             return
     proc = _procs.get(job_id)
     if proc and proc.poll() is None:
-        # SIGTERM: el worker detiene el entrenamiento y guarda
+        # SIGTERM: the worker stops training and saves
         proc.send_signal(signal.SIGTERM)
 
 
@@ -205,7 +205,7 @@ def _run(job: Job) -> None:
             j.status = "cancelled" if j.result.get("stopped_early") else "completed"
         else:
             j.status = "failed" if code != -signal.SIGKILL else "cancelled"
-            j.error = j.result.get("error") or f"El proceso terminó con código {code}"
+            j.error = j.result.get("error") or f"The process ended with code {code}"
         s.add(j)
         s.commit()
 
@@ -229,10 +229,10 @@ def _loop() -> None:
 
 
 def start() -> None:
-    # Trabajos que quedaron "running" tras un reinicio del backend están huérfanos
+    # Jobs left "running" after a backend restart are orphaned
     with Session(engine) as s:
         for j in s.exec(select(Job).where(Job.status == "running")).all():
-            j.status, j.error, j.finished_at = "failed", "El backend se reinició durante la ejecución", now()
+            j.status, j.error, j.finished_at = "failed", "The backend restarted while it was running", now()
             s.add(j)
         s.commit()
     threading.Thread(target=_loop, daemon=True, name="job-queue").start()

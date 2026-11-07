@@ -1,7 +1,7 @@
-"""Worker de fine-tuning de embeddings (sentence-transformers). Uso: python -m app.workers.embed <job_dir>/config.json
+"""Embedding fine-tuning worker (sentence-transformers). Usage: python -m app.workers.embed <job_dir>/config.json
 
-Entrena con pares (consulta, pasaje) y MultipleNegativesRankingLoss (los demás pasajes del lote hacen de
-negativos). Mide recall@k y MRR sobre un conjunto reservado antes y después para comprobar la mejora.
+It trains on (query, passage) pairs with MultipleNegativesRankingLoss (the other passages in the batch act as
+negatives). It measures recall@k and MRR on a held-out set before and after, to check the improvement.
 """
 import json
 import os
@@ -19,7 +19,7 @@ def prefix(model: str, kind: str) -> str:
 
 
 def ir_metrics(model, pairs, name, k=(1, 5, 10)):
-    """Recall@k y MRR@10 recuperando cada consulta contra todos los pasajes del conjunto de evaluación."""
+    """Recall@k and MRR@10, retrieving each query against all the passages in the evaluation set."""
     import numpy as np
     passages = list(dict.fromkeys(p for _, p in pairs))
     pid = {p: i for i, p in enumerate(passages)}
@@ -52,14 +52,14 @@ def main():
         random.Random(cfg.get("seed", 42)).shuffle(pairs)
         n_eval = max(20, int(len(pairs) * cfg.get("eval_ratio", 0.15)))
         eval_pairs, train_pairs = pairs[:n_eval], pairs[n_eval:]
-        em.status(f"{len(train_pairs)} pares de entrenamiento, {len(eval_pairs)} de evaluación")
+        em.status(f"{len(train_pairs)} training pairs, {len(eval_pairs)} for evaluation")
         if len(train_pairs) < 20:
-            raise ValueError("Hacen falta al menos ~40 pares; enriquece más fragmentos o usa un dataset mayor")
+            raise ValueError("At least ~40 pairs are needed; enrich more chunks or use a bigger dataset")
 
         model = SentenceTransformer(base, device="cuda")
-        em.status("Midiendo recuperación del modelo base…")
+        em.status("Measuring the base model's retrieval…")
         before = ir_metrics(model, eval_pairs, base)
-        em.emit("embed_eval", stage="antes", **before)
+        em.emit("embed_eval", stage="before", **before)
 
         ds = Dataset.from_dict({"anchor": [prefix(base, "query") + a for a, _ in train_pairs],
                                 "positive": [prefix(base, "passage") + p for _, p in train_pairs]})
@@ -79,16 +79,16 @@ def main():
             output_dir=out_dir, num_train_epochs=cfg.get("epochs", 2), per_device_train_batch_size=cfg.get("batch_size", 32),
             learning_rate=cfg.get("learning_rate", 2e-5), warmup_ratio=0.1, bf16=True, logging_steps=5,
             save_strategy="no", report_to=[], seed=cfg.get("seed", 42),
-            batch_sampler=BatchSamplers.NO_DUPLICATES,  # evita el mismo pasaje dos veces en un lote (falso negativo)
+            batch_sampler=BatchSamplers.NO_DUPLICATES,  # avoids the same passage twice in a batch (false negative)
         )
         trainer = SentenceTransformerTrainer(model=model, args=args, train_dataset=ds,
                                              loss=losses.MultipleNegativesRankingLoss(model), callbacks=[Live()])
-        em.status("Entrenando embeddings…")
+        em.status("Training embeddings…")
         trainer.train()
 
-        em.status("Midiendo recuperación del modelo ajustado…")
+        em.status("Measuring the fine-tuned model's retrieval…")
         after = ir_metrics(model, eval_pairs, base)
-        em.emit("embed_eval", stage="después", **after)
+        em.emit("embed_eval", stage="after", **after)
         final_dir = os.path.join(out_dir, "final")
         model.save(final_dir)
         with open(os.path.join(final_dir, "llmtrainer.json"), "w") as f:

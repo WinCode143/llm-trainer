@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Copy } from "lucide-react";
 
-/** Markdown seguro (sin HTML crudo) con tablas, listas y bloques de código copiables. */
+/** Safe Markdown (no raw HTML) with tables, lists and copyable code blocks. */
 export function Markdown({ text }: { text: string }) {
   return (
     <div className="md">
@@ -23,13 +23,13 @@ function CodeBlock({ children }: { children: React.ReactNode }) {
   };
   return (
     <div className="codeblock">
-      <button className="ghost sm copy" onClick={copy} title="Copiar">{done ? <Check size={12} /> : <Copy size={12} />}</button>
+      <button className="ghost sm copy" onClick={copy} title="Copy">{done ? <Check size={12} /> : <Copy size={12} />}</button>
       <pre>{children}</pre>
     </div>
   );
 }
 
-/** Respuesta del asistente: separa bloques <think>…</think> (modelos razonadores) y renderiza Markdown. */
+/** Assistant reply: splits out <think>…</think> blocks (reasoning models) and renders Markdown. */
 export function AssistantText({ text, streaming }: { text: string; streaming?: boolean }) {
   const m = text.match(/^\s*<think>([\s\S]*?)(<\/think>|$)([\s\S]*)$/);
   if (!m) return <Markdown text={text} />;
@@ -40,7 +40,7 @@ export function AssistantText({ text, streaming }: { text: string; streaming?: b
     <>
       {thinking && (
         <details className="think" open={streaming && !closed}>
-          <summary>{closed ? "Razonamiento" : "Pensando…"}</summary>
+          <summary>{closed ? "Reasoning" : "Thinking…"}</summary>
           <div style={{ whiteSpace: "pre-wrap" }}>{thinking}</div>
         </details>
       )}

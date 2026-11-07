@@ -49,7 +49,7 @@ export default function CompareRuns() {
   const [onlyDiff, setOnlyDiff] = useState(true);
   const fmt = (v: any) => (v == null ? "—" : typeof v === "number" ? (Math.abs(v) < 0.01 && v !== 0 ? v.toExponential(2) : +v.toFixed(4)) : String(v));
 
-  // Interpretación de los números: qué gana, qué invalida la comparación y qué mirar después
+  // Interpreting the numbers: who wins, what invalidates the comparison and what to look at next
   const verdict = useMemo(() => verdictForTraining(
     runs.filter((r) => r.job.type === "train").map((r) => {
       const f = final(r);
@@ -69,12 +69,12 @@ export default function CompareRuns() {
     <>
       <div className="page-head">
         <div>
-          <Link to="/training" className="sub row" style={{ gap: 4 }}><ArrowLeft size={14} /> Entrenamiento</Link>
-          <h1>Comparar entrenamientos</h1>
-          <div className="sub">{runs.length} trabajos</div>
+          <Link to="/training" className="sub row" style={{ gap: 4 }}><ArrowLeft size={14} /> Training</Link>
+          <h1>Compare training runs</h1>
+          <div className="sub">{runs.length} jobs</div>
         </div>
       </div>
-      {runs.length < 2 && <div className="card empty">Selecciona al menos dos entrenamientos en la lista de Entrenamiento.</div>}
+      {runs.length < 2 && <div className="card empty">Select at least two training runs in the Training list.</div>}
       {runs.length >= 2 && runs.some((r) => r.job.type === "bench") && (() => {
         const benchRuns = runs.filter((r) => r.job.type === "bench");
         const tasks = [...new Set(benchRuns.flatMap((r) => r.events.filter((e) => e.type === "bench_task").map((e) => e.task)))];
@@ -83,7 +83,7 @@ export default function CompareRuns() {
           <div className="card">
             <h3>Benchmarks</h3>
             <table>
-              <thead><tr><th>Tarea</th>{benchRuns.map((r, i) => <th key={r.job.id} style={{ color: COLORS[i % COLORS.length] }}>{r.job.config.model_name}</th>)}{benchRuns.length === 2 && <th>Diferencia</th>}</tr></thead>
+              <thead><tr><th>Task</th>{benchRuns.map((r, i) => <th key={r.job.id} style={{ color: COLORS[i % COLORS.length] }}>{r.job.config.model_name}</th>)}{benchRuns.length === 2 && <th>Difference</th>}</tr></thead>
               <tbody>{tasks.map((t) => {
                 const vs = benchRuns.map((r) => val(r, t));
                 const d = vs.length === 2 && vs[0] != null && vs[1] != null ? vs[1] - vs[0] : null;
@@ -91,7 +91,7 @@ export default function CompareRuns() {
                   {benchRuns.length === 2 && <td style={{ color: d == null ? undefined : d >= -0.01 ? "var(--ok)" : "var(--err)" }}>{d == null ? "—" : `${d >= 0 ? "+" : ""}${(d * 100).toFixed(1)} pts`}</td>}</tr>);
               })}</tbody>
             </table>
-            {benchRuns.length === 2 && <div className="sub" style={{ marginTop: 6, fontSize: 12 }}>Caídas de más de 2–3 puntos tras un fine-tuning suelen indicar olvido catastrófico: reduce épocas o learning rate, o mezcla datos generales.</div>}
+            {benchRuns.length === 2 && <div className="sub" style={{ marginTop: 6, fontSize: 12 }}>Drops of more than 2–3 points after fine-tuning usually mean catastrophic forgetting: use fewer epochs or a lower learning rate, or mix in general data.</div>}
           </div>
         );
       })()}
@@ -99,7 +99,7 @@ export default function CompareRuns() {
         <>
           <VerdictPanel findings={verdict} />
           <div className="card">
-            <div className="row between"><h3 style={{ margin: 0 }}>Curvas</h3>
+            <div className="row between"><h3 style={{ margin: 0 }}>Curves</h3>
               <select value={metric} onChange={(e) => setMetric(e.target.value)} style={{ width: "auto" }}>{metrics.map((m) => <option key={m}>{m}</option>)}</select></div>
             <ResponsiveContainer width="100%" height={320}>
               <LineChart data={data}>
@@ -113,9 +113,9 @@ export default function CompareRuns() {
             </ResponsiveContainer>
           </div>
           <div className="card">
-            <h3>Resultados</h3>
+            <h3>Results</h3>
             <table>
-              <thead><tr><th>Trabajo</th><th>Estado</th><th>Loss media</th><th>Loss final</th><th>Eval loss</th><th>Duración</th><th>VRAM pico</th></tr></thead>
+              <thead><tr><th>Job</th><th>Status</th><th>Mean loss</th><th>Final loss</th><th>Eval loss</th><th>Duration</th><th>Peak VRAM</th></tr></thead>
               <tbody>{runs.map((r, i) => { const f = final(r); return (
                 <tr key={r.job.id}><td><span style={{ color: COLORS[i % COLORS.length] }}>●</span> <Link to={`/training/${r.job.id}`}>{label(r)}</Link></td>
                   <td><StatusBadge status={r.job.status} /></td><td>{fmt(f.train_loss)}</td><td>{fmt(f.last_loss)}</td><td>{fmt(f.eval_loss)}</td>
@@ -123,11 +123,11 @@ export default function CompareRuns() {
             </table>
           </div>
           <div className="card">
-            <div className="row between"><h3 style={{ margin: 0 }}>Configuración</h3>
-              <label className="check"><input type="checkbox" checked={onlyDiff} onChange={(e) => setOnlyDiff(e.target.checked)} /> Sólo diferencias</label></div>
+            <div className="row between"><h3 style={{ margin: 0 }}>Configuration</h3>
+              <label className="check"><input type="checkbox" checked={onlyDiff} onChange={(e) => setOnlyDiff(e.target.checked)} /> Differences only</label></div>
             <div style={{ overflowX: "auto" }}>
               <table style={{ marginTop: 8 }}>
-                <thead><tr><th>Parámetro</th>{runs.map((r, i) => <th key={r.job.id} style={{ color: COLORS[i % COLORS.length] }}>#{r.job.id}</th>)}</tr></thead>
+                <thead><tr><th>Parameter</th>{runs.map((r, i) => <th key={r.job.id} style={{ color: COLORS[i % COLORS.length] }}>#{r.job.id}</th>)}</tr></thead>
                 <tbody>{keys.filter((k) => !onlyDiff || differs(k)).map((k) => (
                   <tr key={k} style={{ background: differs(k) ? "color-mix(in srgb, var(--warn) 7%, transparent)" : undefined }}>
                     <td className="mono">{k}</td>{runs.map((r) => <td key={r.job.id} className="mono truncate" style={{ maxWidth: 220 }} title={String(r.job.config[k])}>{fmt(r.job.config[k])}</td>)}</tr>

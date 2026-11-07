@@ -65,10 +65,10 @@ SETUP_SCRIPTS = {"unsloth": "setup-unsloth.sh", "llamacpp": "setup-llamacpp.sh",
 
 @router.post("/system/setup/{tool}")
 def setup_tool(tool: str):
-    """Instala una herramienta opcional ejecutando su script; el progreso se ve en la tarea."""
+    """Installs an optional tool by running its script; the progress shows in the task."""
     script = SETUP_SCRIPTS.get(tool)
     if not script:
-        raise HTTPException(404, f"Herramienta desconocida: {tool}")
+        raise HTTPException(404, f"Unknown tool: {tool}")
     path = ROOT / "backend" / script
 
     def work(task):
@@ -79,14 +79,14 @@ def setup_tool(tool: str):
             line = line.rstrip()
             if line:
                 lines.append(line)
-                # Porcentaje de compilación de cmake: "[ 42%] Building ..."
+                # cmake's build percentage: "[ 42%] Building ..."
                 pct = line[1:4].strip().rstrip("%") if line.startswith("[") and "%]" in line[:6] else None
                 task.update(int(pct) / 100 if pct and pct.isdigit() else None, line[-160:])
         if proc.wait() != 0:
             raise RuntimeError("\n".join(lines[-15:]))
         return {"ok": True, "log_tail": lines[-5:]}
 
-    return tasks.submit("setup", f"Instalar {tool}", work).to_dict()
+    return tasks.submit("setup", f"Install {tool}", work).to_dict()
 
 
 @router.get("/tasks")
@@ -107,24 +107,24 @@ def list_backups():
 
 @router.post("/system/backups")
 def create_backup(body: BackupBody):
-    """Copia de la base de datos, los datasets y el RAG (no incluye los pesos de modelos)."""
+    """A backup of the database, the datasets and RAG (model weights not included)."""
     from ..services import backup
-    return tasks.submit("backup", "Copia de seguridad", lambda task: backup.create(task, body.note)).to_dict()
+    return tasks.submit("backup", "Backup", lambda task: backup.create(task, body.note)).to_dict()
 
 
 @router.delete("/system/backups/{name}")
 def delete_backup(name: str):
     from ..services import backup
     if not backup.delete(name):
-        raise HTTPException(404, "Copia no encontrada")
+        raise HTTPException(404, "Backup not found")
     return {"ok": True}
 
 
 @router.post("/system/backups/{name}/verify")
 def verify_backup(name: str):
-    """Abre la copia en un temporal y comprueba que la base de datos es legible. No toca tus datos."""
+    """Opens the backup in a temp folder and checks that the database is readable. It doesn't touch your data."""
     from ..services import backup
-    return tasks.submit("verify", f"Verificar {name}", lambda task: backup.verify(name)).to_dict()
+    return tasks.submit("verify", f"Verify {name}", lambda task: backup.verify(name)).to_dict()
 
 
 @router.get("/system/backups/{name}/restore-help")
@@ -135,7 +135,7 @@ def restore_help(name: str):
 
 @router.post("/tasks/{tid}/cancel")
 def cancel_task(tid: str):
-    """Pide a una tarea larga (enriquecer, resúmenes…) que pare en el siguiente paso."""
+    """Asks a long task (enrich, summaries…) to stop at the next step."""
     t = tasks.get(tid)
     if not t:
         raise HTTPException(404)

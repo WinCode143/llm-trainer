@@ -1,7 +1,7 @@
-"""Servidor MCP (Model Context Protocol): expone las colecciones RAG y los modelos de LLM Trainer
-a agentes externos (Claude Code/Desktop, Cursor, Open WebUI…) en http://<host>:<puerto>/mcp/
+"""MCP (Model Context Protocol) server: exposes LLM Trainer's RAG collections and models
+to external agents (Claude Code/Desktop, Cursor, Open WebUI…) at http://<host>:<port>/mcp/
 
-Las herramientas hacen trabajo bloqueante (embeddings, GPU), así que se ejecutan en un hilo aparte.
+The tools do blocking work (embeddings, GPU), so they run in a separate thread.
 """
 import anyio
 from mcp.server.mcpserver import MCPServer
@@ -16,11 +16,11 @@ from ..services.inference import GenParams, manager
 server = MCPServer(
     name="llm-trainer",
     title="LLM Trainer",
-    instructions=("Acceso a las colecciones de documentos (RAG) y a los modelos locales de LLM Trainer. "
-                  "Usa list_collections para ver qué hay, search_documents para recuperar fragmentos con su fuente "
-                  "y ask para obtener una respuesta redactada por el modelo local con citas. También puedes añadir "
-                  "documentos (add_document con texto, ingest_url con una página), crear datasets de entrenamiento "
-                  "(create_dataset con filas, import_hf_dataset desde Hugging Face) y ejecutar flujos guardados."),
+    instructions=("Access to LLM Trainer's document collections (RAG) and local models. "
+                  "Use list_collections to see what's there, search_documents to retrieve chunks with their source "
+                  "and ask to get an answer written by the local model with citations. You can also add "
+                  "documents (add_document with text, ingest_url with a page), create training datasets "
+                  "(create_dataset with rows, import_hf_dataset from Hugging Face) and run saved flows."),
 )
 
 
@@ -30,11 +30,11 @@ def _collection(name: str) -> RagCollection:
         if not c and name.isdigit():
             c = s.get(RagCollection, int(name))
     if not c:
-        raise ToolError(f"Colección '{name}' no encontrada. Usa list_collections.")
+        raise ToolError(f"Collection '{name}' not found. Use list_collections.")
     return c
 
 
-@server.tool(description="Lista las colecciones RAG disponibles con sus documentos y etiquetas.")
+@server.tool(description="Lists the available RAG collections with their documents and tags.")
 async def list_collections() -> list[dict]:
     with Session(engine) as s:
         cols = s.exec(select(RagCollection)).all()
@@ -43,8 +43,8 @@ async def list_collections() -> list[dict]:
                  "search": f"{c.search_mode}{' + rerank' if c.reranker else ''}"} for c in cols]
 
 
-@server.tool(description="Busca fragmentos relevantes en una colección (búsqueda híbrida + rerank). "
-                         "Devuelve texto, documento de origen, página/sección y score de relevancia (0-1).")
+@server.tool(description="Searches a collection for relevant chunks (hybrid search + rerank). "
+                         "Returns the text, the source document, page/section and a relevance score (0-1).")
 async def search_documents(collection: str, query: str, k: int = 5, tags: list[str] | None = None) -> list[dict]:
     c = _collection(collection)
     hits = await anyio.to_thread.run_sync(lambda: rag.retrieve(c, query, k=k, tags=tags or None))
@@ -52,12 +52,12 @@ async def search_documents(collection: str, query: str, k: int = 5, tags: list[s
              "score": h["score"]} for h in hits]
 
 
-@server.tool(description="Responde a una pregunta usando la colección como contexto y el modelo local cargado. "
-                         "Incluye las fuentes citadas. Requiere un modelo cargado en LLM Trainer.")
+@server.tool(description="Answers a question using the collection as context and the loaded local model. "
+                         "Includes the cited sources. Requires a model loaded in LLM Trainer.")
 async def ask(collection: str, question: str, max_tokens: int = 512) -> dict:
     c = _collection(collection)
     if not manager.current:
-        raise ToolError("No hay ningún modelo cargado en LLM Trainer (cárgalo en Playground o Modelos).")
+        raise ToolError("No model is loaded in LLM Trainer (load one in Playground or Models).")
 
     def run():
         msgs, hits, mode = rag.prepare(c, question)
@@ -70,7 +70,7 @@ async def ask(collection: str, question: str, max_tokens: int = 512) -> dict:
     return await anyio.to_thread.run_sync(run)
 
 
-@server.tool(description="Lista los modelos registrados (base, LoRA, fusionados, GGUF) e indica cuál está cargado.")
+@server.tool(description="Lists the registered models (base, LoRA, merged, GGUF) and says which one is loaded.")
 async def list_models() -> list[dict]:
     with Session(engine) as s:
         rows = s.exec(select(Model)).all()
@@ -78,13 +78,13 @@ async def list_models() -> list[dict]:
     return [{"name": m.name, "kind": m.kind, "base_model": m.base_model, "loaded": m.name == loaded} for m in rows]
 
 
-# ------------------------------------------------------------------ escritura
-# Estas herramientas modifican la aplicación. Se dejan explícitas y acotadas: un agente externo puede
-# ingerir documentos, crear datasets y lanzar flujos, pero no borrar nada ni tocar los modelos.
+# ------------------------------------------------------------------ writing
+# These tools modify the application. They're explicit and limited: an external agent can
+# ingest documents, create datasets and run flows, but not delete anything or touch the models.
 
 
-@server.tool(description="Ingiere un documento en una colección RAG a partir de su texto. "
-                         "Úsalo para añadir notas, transcripciones o cualquier texto que quieras poder consultar después.")
+@server.tool(description="Ingests a document into a RAG collection from its text. "
+                         "Use it to add notes, transcripts or any text you want to be able to query later.")
 async def add_document(collection: str, filename: str, text: str) -> dict:
     c = _collection(collection)
 
@@ -99,47 +99,47 @@ async def add_document(collection: str, filename: str, text: str) -> dict:
                 col.documents = [*(col.documents or []), name]
             s.add(col)
             s.commit()
-        return {"documento": name, "fragmentos": chunks, "coleccion": c.name}
+        return {"document": name, "chunks": chunks, "collection": c.name}
 
     return await anyio.to_thread.run_sync(run)
 
 
-@server.tool(description="Crea un dataset de entrenamiento a partir de pares pregunta/respuesta. "
-                         "Formato de cada fila: {'instruction': …, 'output': …}. Queda listo para entrenar en la app.")
+@server.tool(description="Creates a training dataset from question/answer pairs. "
+                         "Each row's format: {'instruction': …, 'output': …}. It's ready to train in the app.")
 async def create_dataset(name: str, rows: list[dict]) -> dict:
     from ..db import Dataset
     from ..services import datasets as ds_service
 
     def run():
-        limpio = [r for r in rows if r.get("instruction") and r.get("output")]
-        if not limpio:
-            raise ToolError("Ninguna fila tiene 'instruction' y 'output'")
+        clean = [r for r in rows if r.get("instruction") and r.get("output")]
+        if not clean:
+            raise ToolError("No row has 'instruction' and 'output'")
         with Session(engine) as s:
             if s.exec(select(Dataset).where(Dataset.name == name)).first():
-                raise ToolError(f"Ya existe un dataset llamado '{name}'. Elige otro nombre.")
-            fmt, filas = ds_service.normalize(limpio, "chat")
-            path = ds_service.write_jsonl(name, filas)
-            d = Dataset(name=name, format=fmt, path=str(path), num_rows=len(filas), source="mcp")
+                raise ToolError(f"There's already a dataset called '{name}'. Pick another name.")
+            fmt, rows = ds_service.normalize(clean, "chat")
+            path = ds_service.write_jsonl(name, rows)
+            d = Dataset(name=name, format=fmt, path=str(path), num_rows=len(rows), source="mcp")
             s.add(d)
             s.commit()
             s.refresh(d)
-            return {"id": d.id, "nombre": d.name, "filas": d.num_rows, "formato": d.format}
+            return {"id": d.id, "name": d.name, "rows": d.num_rows, "format": d.format}
 
     return await anyio.to_thread.run_sync(run)
 
 
-@server.tool(description="Descarga una página web (o un PDF enlazado) y la indexa en una colección RAG, "
-                         "con la URL como fuente citable. Úsalo tras encontrar un artículo, una documentación o un paper.")
+@server.tool(description="Downloads a web page (or a linked PDF) and indexes it into a RAG collection, "
+                         "with the URL as a citable source. Use it after finding an article, some documentation or a paper.")
 async def ingest_url(collection: str, url: str) -> dict:
     c = _collection(collection)
     if not url.startswith(("http://", "https://")):
-        raise ToolError("La URL tiene que empezar por http:// o https://")
+        raise ToolError("The URL has to start with http:// or https://")
 
     def run():
         try:
             raw = rag.fetch_url(url)
         except Exception as e:  # noqa: BLE001
-            raise ToolError(f"No se pudo descargar {url}: {e}") from e
+            raise ToolError(f"Couldn't download {url}: {e}") from e
         chunks = rag.ingest(c.id, c.embed_model, url, raw, c.chunk_size, c.chunk_overlap,
                             template=c.chunk_template, ext=rag.url_ext(url, raw), parser=c.parser or "auto")
         with Session(engine) as s:
@@ -148,98 +148,98 @@ async def ingest_url(collection: str, url: str) -> dict:
             col.num_chunks = rag.count(c.id)
             s.add(col)
             s.commit()
-        return {"documento": url, "fragmentos": chunks, "coleccion": c.name}
+        return {"document": url, "chunks": chunks, "collection": c.name}
 
     return await anyio.to_thread.run_sync(run)
 
 
-def carpeta_entrada():
+def inbox_dir():
     from ..config import settings
-    d = (settings.data_dir / "entrada").resolve()
+    d = (settings.data_dir / "inbox").resolve()
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-@server.tool(description="Indexa en una colección RAG un archivo de la carpeta de entrada de la app (data/entrada): "
-                         "PDF, Word, Markdown, CSV, HTML… La ruta es relativa a esa carpeta.")
+@server.tool(description="Indexes a file from the app's inbox folder (data/inbox) into a RAG collection: "
+                         "PDF, Word, Markdown, CSV, HTML… The path is relative to that folder.")
 async def ingest_file(collection: str, path: str) -> dict:
     c = _collection(collection)
-    base = carpeta_entrada()
+    base = inbox_dir()
     f = (base / path.lstrip("/")).resolve()
-    # Sólo esa carpeta: un agente externo no debe poder meter cualquier archivo del disco en una colección
+    # Only that folder: an external agent mustn't be able to put any file on the disk into a collection
     if base not in f.parents or not f.is_file():
-        raise ToolError(f"'{path}' no es un archivo dentro de data/entrada")
+        raise ToolError(f"'{path}' isn't a file inside data/inbox")
 
     def run():
         chunks = rag.ingest(c.id, c.embed_model, f.name, f.read_bytes(), c.chunk_size, c.chunk_overlap,
                             template=c.chunk_template, parser=c.parser or "auto")
         with Session(engine) as s:
             col = s.get(RagCollection, c.id)
-            ya = f.name in (col.documents or [])
+            already = f.name in (col.documents or [])
             col.documents = sorted(set(col.documents or []) | {f.name})
             col.num_chunks = rag.count(c.id)
             s.add(col)
             s.commit()
-        # Re-indexar reemplaza la versión anterior (no duplica); se avisa para que el agente sepa qué era nuevo
-        return {"documento": f.name, "fragmentos": chunks, "coleccion": c.name, "ya_estaba": ya}
+        # Re-indexing replaces the previous version (it doesn't duplicate); it's flagged so the agent knows what was new
+        return {"document": f.name, "chunks": chunks, "collection": c.name, "already_indexed": already}
 
     return await anyio.to_thread.run_sync(run)
 
 
-@server.tool(description="Importa un dataset del Hub de Hugging Face (p. ej. 'tatsu-lab/alpaca') como dataset de "
-                         "entrenamiento de la app. Detecta el formato (instrucción/respuesta, chat, preferencias). "
-                         "Busca antes el nombre exacto del repositorio; limit acota las filas (por defecto 500).")
+@server.tool(description="Imports a dataset from the Hugging Face Hub (e.g. 'tatsu-lab/alpaca') as a training "
+                         "dataset in the app. It detects the format (instruction/answer, chat, preferences). "
+                         "Look up the exact repository name first; limit caps the rows (500 by default).")
 async def import_hf_dataset(repo: str, name: str = "", split: str = "train", subset: str = "",
                             limit: int = 500) -> dict:
     from ..db import Dataset
     from ..services import datasets as ds_service
 
-    nombre = (name or repo.split("/")[-1]).strip()
+    name_ = (name or repo.split("/")[-1]).strip()
     limit = max(1, min(int(limit or 500), 20000))
 
     def run():
         with Session(engine) as s:
-            if s.exec(select(Dataset).where(Dataset.name == nombre)).first():
-                raise ToolError(f"Ya existe un dataset llamado '{nombre}'. Pasa otro name.")
+            if s.exec(select(Dataset).where(Dataset.name == name_)).first():
+                raise ToolError(f"There's already a dataset called '{name_}'. Pass another name.")
         try:
-            fmt, filas = ds_service.import_hf(repo, split, subset or None, limit, None, None)
+            fmt, rows = ds_service.import_hf(repo, split, subset or None, limit, None, None)
         except Exception as e:  # noqa: BLE001
-            raise ToolError(f"No se pudo importar {repo}: {e}") from e
+            raise ToolError(f"Couldn't import {repo}: {e}") from e
         with Session(engine) as s:
-            path = ds_service.write_jsonl(nombre, filas)
-            d = Dataset(name=nombre, format=fmt, path=str(path), num_rows=len(filas), source=f"hf:{repo}")
+            path = ds_service.write_jsonl(name_, rows)
+            d = Dataset(name=name_, format=fmt, path=str(path), num_rows=len(rows), source=f"hf:{repo}")
             s.add(d)
             s.commit()
             s.refresh(d)
-            out = {"id": d.id, "nombre": d.name, "filas": d.num_rows, "formato": d.format,
-                   "ejemplo": {k: str(v)[:300] for k, v in (filas[0] if filas else {}).items()}}
+            out = {"id": d.id, "name": d.name, "rows": d.num_rows, "format": d.format,
+                   "example": {k: str(v)[:300] for k, v in (rows[0] if rows else {}).items()}}
             if fmt == "text":
-                # Texto corrido: sirve para preentrenar, no para enseñar a responder instrucciones
-                out["aviso"] = ("No tiene pares pregunta/respuesta: es texto corrido. Sirve para preentrenamiento "
-                                "continuado, no para un asistente. Probablemente convenga otro dataset.")
+                # Running text: good for pretraining, not for teaching it to answer instructions
+                out["warning"] = ("It has no question/answer pairs: it's running text. It's for continued "
+                                "pretraining, not for an assistant. Another dataset is probably a better fit.")
             return out
 
     return await anyio.to_thread.run_sync(run)
 
 
-@server.tool(description="Lista los datasets de entrenamiento de la app con su formato y número de filas.")
+@server.tool(description="Lists the app's training datasets with their format and number of rows.")
 async def list_datasets() -> list[dict]:
     from ..db import Dataset
     with Session(engine) as s:
-        return [{"nombre": d.name, "formato": d.format, "filas": d.num_rows, "origen": d.source}
+        return [{"name": d.name, "format": d.format, "rows": d.num_rows, "source": d.source}
                 for d in s.exec(select(Dataset)).all()]
 
 
-@server.tool(description="Lista los flujos guardados (procesos de varios pasos definidos en la app).")
+@server.tool(description="Lists the saved flows (multi-step processes defined in the app).")
 async def list_flows() -> list[dict]:
     from ..db import Flow
     with Session(engine) as s:
-        return [{"nombre": f.name, "descripcion": f.description, "nodos": len(f.spec.get("nodes", []))}
+        return [{"name": f.name, "description": f.description, "nodes": len(f.spec.get("nodes", []))}
                 for f in s.exec(select(Flow)).all()]
 
 
-@server.tool(description="Ejecuta un flujo guardado con una entrada y devuelve su resultado final. "
-                         "Si el flujo tiene un nodo de aprobación, se detendrá y habrá que continuarlo desde la app.")
+@server.tool(description="Runs a saved flow with an input and returns its final result. "
+                         "If the flow has an approval node, it will stop and has to be continued from the app.")
 async def run_flow(name: str, input: str) -> dict:
     from ..db import Flow
     from ..services import flows as flows_svc
@@ -247,26 +247,26 @@ async def run_flow(name: str, input: str) -> dict:
     with Session(engine, expire_on_commit=False) as s:
         f = s.exec(select(Flow).where(Flow.name == name)).first()
     if not f:
-        raise ToolError(f"Flujo '{name}' no encontrado. Usa list_flows.")
+        raise ToolError(f"Flow '{name}' not found. Use list_flows.")
 
     def run():
-        pasos, salida, esperando = [], "", False
-        for ev in flows_svc.run(f.spec, {"_entrada": input, "entrada": input}):
+        steps, output, waiting = [], "", False
+        for ev in flows_svc.run(f.spec, {"_input": input, "input": input}):
             if ev["type"] == "node":
-                pasos.append(ev["label"])
+                steps.append(ev["label"])
             elif ev["type"] == "interrupt":
-                esperando = True
+                waiting = True
             elif ev["type"] == "done":
-                salida = ev.get("vars", {}).get("_salida", "")
+                output = ev.get("vars", {}).get("_output", "")
             elif ev["type"] == "error":
                 raise ToolError(ev["message"])
-        return {"resultado": salida, "pasos": pasos,
-                "pendiente_de_aprobacion": esperando} if not esperando else {
-            "pasos": pasos, "pendiente_de_aprobacion": True,
-            "aviso": "El flujo se detuvo en un nodo de aprobación; continúalo desde la pantalla Flujos de la app."}
+        return {"result": output, "steps": steps,
+                "waiting_for_approval": waiting} if not waiting else {
+            "steps": steps, "waiting_for_approval": True,
+            "warning": "The flow stopped at an approval node; continue it from the app's Flows screen."}
 
     return await anyio.to_thread.run_sync(run)
 
 
-# Sub-aplicación ASGI; se monta en /mcp y su session manager arranca en el lifespan de FastAPI
+# ASGI sub-application; mounted at /mcp and its session manager starts in FastAPI's lifespan
 app = server.streamable_http_app(streamable_http_path="/")

@@ -1,6 +1,6 @@
-"""Worker de benchmarks estándar con lm-evaluation-harness. Uso: python -m app.workers.bench <job_dir>/config.json
+"""Standard benchmarks worker with lm-evaluation-harness. Usage: python -m app.workers.bench <job_dir>/config.json
 
-Sirve para detectar si un fine-tuning hizo "olvidar" capacidades generales al modelo (comparando base vs ajustado).
+It's for detecting whether fine-tuning made the model “forget” general skills (comparing base vs fine-tuned).
 """
 import os
 import time
@@ -10,7 +10,7 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 from .common import Emitter, load_config  # noqa: E402
 
-# Métrica principal a mostrar por tarea (la primera que exista)
+# Main metric to show per task (the first one that exists)
 PRIMARY = ["acc_norm,none", "acc,none", "exact_match,strict-match", "exact_match,flexible-extract", "exact_match,none"]
 
 
@@ -25,16 +25,16 @@ def main():
         if cfg.get("peft"):
             margs += f",peft={cfg['peft']}"
         tasks = cfg["tasks"]
-        em.status(f"Evaluando {cfg['model_name']} en {', '.join(tasks)} (límite {cfg.get('limit') or 'sin límite'} ejemplos/tarea)")
+        em.status(f"Evaluating {cfg['model_name']} on {', '.join(tasks)} (limit {cfg.get('limit') or 'none'} examples/task)")
         em.emit("progress", step=0, max_steps=len(tasks))
         results = {}
         for i, task in enumerate(tasks):
-            em.status(f"Tarea {i + 1}/{len(tasks)}: {task}")
+            em.status(f"Task {i + 1}/{len(tasks)}: {task}")
             out = lm_eval.simple_evaluate(model="hf", model_args=margs, tasks=[task], limit=cfg.get("limit") or None,
                                           batch_size=cfg.get("batch_size", "auto"), num_fewshot=cfg.get("num_fewshot"),
                                           apply_chat_template=cfg.get("apply_chat_template", False), log_samples=False)
             res = out["results"]
-            # Tareas-grupo (mmlu, spanish_bench…) devuelven subtareas: usamos la agregada si existe
+            # Group tasks (mmlu, spanish_bench…) return subtasks: we use the aggregate if it exists
             agg = out.get("groups", {}).get(task) or res.get(task) or next(iter(res.values()))
             key = next((k for k in PRIMARY if k in agg), None)
             results[task] = {"metric": key.split(",")[0] if key else None, "value": agg.get(key) if key else None,

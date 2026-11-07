@@ -1,18 +1,18 @@
-"""Modelos ayudantes: además del modelo cargado en VRAM, la app puede apoyarse en modelos externos.
+"""Helper models: besides the model loaded in VRAM, the app can lean on external models.
 
-Para qué sirve: generar datasets sintéticos, extraer el grafo de conocimiento, hacer de juez en las
-evaluaciones o enriquecer el RAG son tareas donde un modelo pequeño se queda corto. Con esto puedes
-delegarlas en un modelo grande (local en otra máquina, o de pago) sin cambiar nada más.
+What for: generating synthetic datasets, extracting the knowledge graph, judging
+evaluations or enriching RAG are tasks where a small model falls short. With this you can
+hand them to a big model (local on another machine, or paid) without changing anything else.
 
-Dos familias, las dos por HTTP:
-  - «openai»:    cualquier servidor compatible con la API de OpenAI (Ollama, LM Studio, vLLM remoto,
-                 OpenRouter, Groq, DeepSeek, la propia OpenAI…). Sólo hace falta la URL base.
-  - «anthropic»: la API de Claude (formato de mensajes propio).
+Two families, both over HTTP:
+    - “openai”:    any server compatible with the OpenAI API (Ollama, LM Studio, remote vLLM,
+                                  OpenRouter, Groq, DeepSeek, OpenAI itself…). Only the base URL is needed.
+    - “anthropic”: the Claude API (its own message format).
 
-El modelo local sigue siendo el de por defecto y no requiere configurar nada: `complete(None, …)`.
+The local model stays the default and needs no setup: `complete(None, …)`.
 
-Las claves se guardan en la base de datos local, en claro. No salen de tu máquina salvo hacia el
-proveedor que configures, pero cualquiera con acceso al archivo puede leerlas.
+Keys are stored in plain text in the local database. They never leave your machine except towards the
+provider you configure, but anyone with access to the file can read them.
 """
 from __future__ import annotations
 
@@ -26,28 +26,28 @@ from sqlmodel import Session, select
 from ..db import Provider, engine
 
 KINDS = {
-    "openai": {"label": "Compatible con OpenAI", "hint": "Ollama, LM Studio, vLLM remoto, OpenRouter, Groq, DeepSeek, OpenAI…"},
-    "anthropic": {"label": "Anthropic (Claude)", "hint": "API de Claude con clave propia"},
+    "openai": {"label": "OpenAI-compatible", "hint": "Ollama, LM Studio, remote vLLM, OpenRouter, Groq, DeepSeek, OpenAI…"},
+    "anthropic": {"label": "Anthropic (Claude)", "hint": "The Claude API with your own key"},
 }
 
-# Atajos para no tener que recordar las URLs
+# Presets so you don't have to remember the URLs
 PRESETS = [
     {"key": "ollama", "label": "Ollama (local)", "kind": "openai", "base_url": "http://localhost:11434/v1",
-     "api_key": "ollama", "model": "llama3.1:8b", "note": "Sin coste; el modelo tiene que estar descargado en Ollama"},
+     "api_key": "ollama", "model": "llama3.1:8b", "note": "Free; the model has to be pulled in Ollama"},
     {"key": "lmstudio", "label": "LM Studio (local)", "kind": "openai", "base_url": "http://localhost:1234/v1",
-     "api_key": "lm-studio", "model": "", "note": "Sin coste; arranca el servidor local en LM Studio"},
+     "api_key": "lm-studio", "model": "", "note": "Free; start the local server in LM Studio"},
     {"key": "openrouter", "label": "OpenRouter", "kind": "openai", "base_url": "https://openrouter.ai/api/v1",
-     "api_key": "", "model": "meta-llama/llama-3.3-70b-instruct", "note": "Cientos de modelos con una sola clave"},
+     "api_key": "", "model": "meta-llama/llama-3.3-70b-instruct", "note": "Hundreds of models with a single key"},
     {"key": "groq", "label": "Groq", "kind": "openai", "base_url": "https://api.groq.com/openai/v1",
-     "api_key": "", "model": "llama-3.3-70b-versatile", "note": "Muy rápido y barato"},
+     "api_key": "", "model": "llama-3.3-70b-versatile", "note": "Very fast and cheap"},
     {"key": "deepseek", "label": "DeepSeek", "kind": "openai", "base_url": "https://api.deepseek.com/v1",
-     "api_key": "", "model": "deepseek-chat", "note": "Muy barato, bueno generando datos"},
+     "api_key": "", "model": "deepseek-chat", "note": "Very cheap, good at generating data"},
     {"key": "openai", "label": "OpenAI", "kind": "openai", "base_url": "https://api.openai.com/v1",
-     "api_key": "", "model": "gpt-4o-mini", "note": "Requiere clave de pago"},
+     "api_key": "", "model": "gpt-4o-mini", "note": "Needs a paid key"},
     {"key": "anthropic", "label": "Anthropic (Claude)", "kind": "anthropic", "base_url": "https://api.anthropic.com/v1",
-     "api_key": "", "model": "claude-sonnet-5", "note": "Requiere clave de pago; no sirve la suscripción de Claude Code"},
-    {"key": "vllm", "label": "vLLM en otra máquina", "kind": "openai", "base_url": "http://192.168.1.10:8000/v1",
-     "api_key": "-", "model": "base", "note": "Otro PC de tu red sirviendo un modelo grande"},
+     "api_key": "", "model": "claude-sonnet-5", "note": "Needs a paid key; a Claude Code subscription won't work"},
+    {"key": "vllm", "label": "vLLM on another machine", "kind": "openai", "base_url": "http://192.168.1.10:8000/v1",
+     "api_key": "-", "model": "base", "note": "Another PC on your network serving a big model"},
 ]
 
 
@@ -62,7 +62,7 @@ def listing(include_keys: bool = False) -> list[dict]:
     out = []
     for p in rows:
         d = p.model_dump(mode="json")
-        # La clave nunca vuelve entera a la interfaz: sólo los últimos caracteres para reconocerla
+        # The key never goes back whole to the interface: only the last characters, to recognize it
         d["api_key"] = p.api_key if include_keys else (f"…{p.api_key[-4:]}" if p.api_key else "")
         d["has_key"] = bool(p.api_key)
         out.append(d)
@@ -88,7 +88,7 @@ def _err(r: httpx.Response) -> str:
 
 
 def remote_models(p: Provider) -> list[str]:
-    """Modelos que ofrece el proveedor (para el desplegable). Algunos no exponen el listado."""
+    """Models the provider offers (for the dropdown). Some don't expose the list."""
     if p.kind == "anthropic":
         with _client(p) as c:
             r = c.get("/models")
@@ -108,14 +108,14 @@ def _messages(prompt: str, system: str | None) -> list[dict]:
 
 def generate(p: Provider, prompt: str, *, system: str | None = None, max_tokens: int = 600,
              temperature: float = 0.3, json_mode: bool = False) -> str:
-    """Una generación contra un proveedor externo. Devuelve el texto."""
+    """One generation against an external provider. Returns the text."""
     if p.kind == "anthropic":
         body: dict[str, Any] = {"model": p.model, "max_tokens": max_tokens, "temperature": temperature,
                                 "messages": [{"role": "user", "content": prompt}]}
         if system:
             body["system"] = system
-        if json_mode:  # Claude no tiene modo JSON: se pide en el prompt y se limpia después
-            body["messages"][0]["content"] += "\n\nResponde ÚNICAMENTE con JSON válido, sin texto alrededor."
+        if json_mode:  # Claude has no JSON mode: it's asked for in the prompt and cleaned up afterwards
+            body["messages"][0]["content"] += "\n\nReply ONLY with valid JSON, with no text around it."
         with _client(p) as c:
             r = c.post("/messages", json=body)
             if r.status_code != 200:
@@ -128,9 +128,9 @@ def generate(p: Provider, prompt: str, *, system: str | None = None, max_tokens:
         body["response_format"] = {"type": "json_object"}
     with _client(p) as c:
         r = c.post("/chat/completions", json=body)
-        if r.status_code == 400 and json_mode:  # no todos admiten response_format
+        if r.status_code == 400 and json_mode:  # not all of them support response_format
             body.pop("response_format")
-            body["messages"][-1]["content"] += "\n\nResponde ÚNICAMENTE con JSON válido, sin texto alrededor."
+            body["messages"][-1]["content"] += "\n\nReply ONLY with valid JSON, with no text around it."
             r = c.post("/chat/completions", json=body)
         if r.status_code != 200:
             raise RuntimeError(f"{p.name}: {_err(r)}")
@@ -139,28 +139,28 @@ def generate(p: Provider, prompt: str, *, system: str | None = None, max_tokens:
 
 
 def test(p: Provider) -> dict:
-    """Ping real: pide una palabra y mide cuánto tarda."""
+    """A real ping: asks for one word and measures how long it takes."""
     import time
 
     from .evaluation import strip_think
     t0 = time.time()
     try:
-        # 200 tokens: los modelos razonadores gastan los primeros en <think> y devolverían una respuesta cortada
-        out = strip_think(generate(p, "Responde solo con la palabra: listo", max_tokens=200, temperature=0))
+        # 200 tokens: reasoning models spend the first ones in <think> and would return a cut-off answer
+        out = strip_think(generate(p, "Reply with just the word: ready", max_tokens=200, temperature=0))
         return {"ok": True, "seconds": round(time.time() - t0, 2), "reply": out.strip()[:80]}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "seconds": round(time.time() - t0, 2), "error": str(e)[:300]}
 
 
-# --------------------------------------------------------------- punto único de generación
+# --------------------------------------------------------------- single generation entry point
 
 def complete(helper: int | None, prompt: str, *, system: str | None = None, max_tokens: int = 600,
              temperature: float = 0.3, json_mode: bool = False, enable_thinking: bool | None = False,
              on_token=None) -> str:
-    """Genera con el ayudante elegido, o con el modelo cargado en VRAM si `helper` es None.
+    """Generates with the chosen helper, or with the model loaded in VRAM if `helper` is None.
 
-    Es el único punto por el que pasan las generaciones auxiliares (datos sintéticos, grafo, juez,
-    enriquecimiento, nodos de flujo), así que cambiar de modelo es cambiar un número.
+    It's the only path auxiliary generations go through (synthetic data, graph, judge,
+    enrichment, flow nodes), so switching models means changing one number.
     """
     from .evaluation import strip_think
     from .inference import GenParams, manager
@@ -168,22 +168,22 @@ def complete(helper: int | None, prompt: str, *, system: str | None = None, max_
     if helper:
         p = get(helper)
         if not p:
-            raise RuntimeError(f"El modelo ayudante #{helper} ya no existe; revísalo en Sistema → Modelos ayudantes")
+            raise RuntimeError(f"Helper model #{helper} no longer exists; check it in System → Helper models")
         if not p.enabled:
-            raise RuntimeError(f"El modelo ayudante «{p.name}» está desactivado")
+            raise RuntimeError(f"The helper model “{p.name}” is disabled")
         return strip_think(generate(p, prompt, system=system, max_tokens=max_tokens, temperature=temperature,
                                     json_mode=json_mode)).strip()
 
     if not manager.current:
-        raise RuntimeError("No hay ningún modelo cargado. Cárgalo en Modelos, o elige un modelo ayudante externo.")
+        raise RuntimeError("No model is loaded. Load one in Models, or pick an external helper model.")
     msgs = _messages(prompt, system)
     params = GenParams(max_new_tokens=max_tokens, temperature=temperature, enable_thinking=enable_thinking)
     if on_token:
-        partes = []
+        parts = []
         for t in manager.stream_chat(msgs, params):
-            partes.append(t)
+            parts.append(t)
             on_token(t)
-        return strip_think("".join(partes)).strip()
+        return strip_think("".join(parts)).strip()
     return strip_think("".join(manager.stream_chat(msgs, params))).strip()
 
 
@@ -191,10 +191,10 @@ JSON_RE = re.compile(r"\{.*\}|\[.*\]", re.S)
 
 
 def complete_json(helper: int | None, prompt: str, **kw) -> Any:
-    """Como `complete` pero devolviendo el JSON ya interpretado (o None si no se pudo)."""
+    """Like `complete` but returning the already parsed JSON (or None if it couldn't)."""
     raw = complete(helper, prompt, json_mode=True, **kw)
     m = JSON_RE.search(raw)
-    for candidate in (raw, m.group(0) if m else None):  # entero, y si no el primer bloque JSON que aparezca
+    for candidate in (raw, m.group(0) if m else None):  # whole, and otherwise the first JSON block that shows up
         if not candidate:
             continue
         try:
@@ -205,9 +205,9 @@ def complete_json(helper: int | None, prompt: str, **kw) -> Any:
 
 
 def describe(helper: int | None) -> str:
-    """Texto corto para las trazas y los registros."""
+    """Short text for traces and logs."""
     if not helper:
         from .inference import manager
-        return manager.current.name if manager.current else "modelo local (ninguno cargado)"
+        return manager.current.name if manager.current else "local model (none loaded)"
     p = get(helper)
-    return f"{p.name} ({p.model})" if p else f"ayudante #{helper} (borrado)"
+    return f"{p.name} ({p.model})" if p else f"helper #{helper} (deleted)"

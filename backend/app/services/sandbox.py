@@ -1,15 +1,15 @@
-"""Aislamiento para el código que ejecutan los agentes (herramienta «Ejecutar Python»).
+"""Sandboxing for the code agents run (the “Run Python” tool).
 
-Usa **bubblewrap** (bwrap): espacios de nombres de usuario, sin root y con arranque de milisegundos.
-Dentro del sandbox el proceso ve:
-  - /usr y /etc en sólo lectura (lo necesario para que Python arranque)
-  - el intérprete y sus paquetes en sólo lectura
-  - una carpeta de trabajo temporal, la única escribible
-  - opcionalmente una carpeta de datos tuya en sólo lectura
-No ve tu /home, ni el proyecto, ni la base de datos, ni los modelos. La red está cortada salvo que la actives.
-Además se aplican límites de memoria, CPU y tamaño de archivo, y un tiempo máximo.
+It uses **bubblewrap** (bwrap): user namespaces, no root and millisecond startup.
+Inside the sandbox the process sees:
+    - /usr and /etc read-only (what Python needs to start)
+    - the interpreter and its packages read-only
+    - a temporary work folder, the only writable one
+    - optionally a data folder of yours, read-only
+It doesn't see your /home, the project, the database or the models. The network is cut off unless you enable it.
+Memory, CPU and file-size limits are applied too, plus a maximum time.
 
-Si bwrap no está disponible se ejecuta sin aislamiento (con límites de recursos) y la interfaz lo advierte.
+If bwrap isn't available it runs without a sandbox (with resource limits) and the interface warns about it.
 """
 import os
 import resource
@@ -25,11 +25,11 @@ BWRAP = shutil.which("bwrap")
 
 @lru_cache(maxsize=1)
 def available() -> bool:
-    """¿Funciona bwrap en esta máquina? (algunos kernels desactivan los user namespaces)."""
+    """Does bwrap work on this machine? (some kernels disable user namespaces)."""
     if not BWRAP:
         return False
     try:
-        # Los enlaces de /lib son imprescindibles: sin ellos no existe el cargador dinámico dentro del sandbox
+        # The /lib links are essential: without them the dynamic loader doesn't exist inside the sandbox
         p = subprocess.run([BWRAP, "--ro-bind", "/usr", "/usr",
                             "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64",
                             "--symlink", "usr/bin", "/bin", "--proc", "/proc", "--dev", "/dev",
@@ -41,20 +41,20 @@ def available() -> bool:
 
 
 def status() -> dict:
-    return {"backend": "bubblewrap" if available() else "ninguno", "available": available(),
-            "detail": ("Aísla sistema de archivos, red y procesos sin root."
-                       if available() else "Instala bubblewrap (paquete `bubblewrap`) para aislar el código de los agentes.")}
+    return {"backend": "bubblewrap" if available() else "none", "available": available(),
+            "detail": ("Isolates the file system, network and processes without root."
+                       if available() else "Install bubblewrap (the `bubblewrap` package) to sandbox the agents' code.")}
 
 
 def interpreter() -> tuple[str, str]:
-    """(intérprete real, carpeta de paquetes). Se usa el binario resuelto: el `python` del entorno virtual es
-    un enlace que pasa por rutas que no existen dentro del sandbox."""
+    """(real interpreter, packages folder). The resolved binary is used: the virtualenv's `python` is
+    a link that goes through paths that don't exist inside the sandbox."""
     import sysconfig
     return str(Path(sys.executable).resolve()), sysconfig.get_paths()["purelib"]
 
 
 def _interpreter_binds() -> list[str]:
-    """Monta en sólo lectura el intérprete y los paquetes del entorno."""
+    """Mounts the environment's interpreter and packages read-only."""
     real, site = interpreter()
     binds: list[str] = []
     seen: set[str] = set()
@@ -67,7 +67,7 @@ def _interpreter_binds() -> list[str]:
 
 def build_command(script: Path, workdir: Path, *, allow_network: bool = False,
                   ro_dir: str | None = None) -> list[str]:
-    """Comando para ejecutar `script` aislado. Sin bwrap, ejecución directa (sin aislamiento)."""
+    """Command to run `script` sandboxed. Without bwrap, a direct run (no sandbox)."""
     real, site = interpreter()
     if not available():
         return [sys.executable, str(script)]
@@ -84,7 +84,7 @@ def build_command(script: Path, workdir: Path, *, allow_network: bool = False,
         "--bind", str(workdir), "/work", "--chdir", "/work",
         "--setenv", "HOME", "/work", "--setenv", "TMPDIR", "/tmp",
         "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
-        "--setenv", "PYTHONPATH", site,  # los paquetes del entorno (numpy, pandas…)
+        "--setenv", "PYTHONPATH", site,  # the environment's packages (numpy, pandas…)
         "--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try",
         "--die-with-parent", "--new-session",
     ]
@@ -93,8 +93,8 @@ def build_command(script: Path, workdir: Path, *, allow_network: bool = False,
     if ro_dir:
         d = str(Path(ro_dir).expanduser().resolve())
         if Path(d).exists():
-            cmd += ["--ro-bind", d, "/datos"]
-    # Dentro del sandbox la carpeta de trabajo está montada en /work
+            cmd += ["--ro-bind", d, "/data"]
+    # Inside the sandbox the work folder is mounted at /work
     return cmd + [real, f"/work/{script.name}"]
 
 
@@ -110,7 +110,7 @@ def _limits(memory_mb: int, cpu_s: int):
 
 def run_python(code: str, *, timeout_s: int = 20, memory_mb: int = 2048, allow_network: bool = False,
                ro_dir: str | None = None) -> dict:
-    """Ejecuta código Python aislado. Devuelve salida, si hubo aislamiento y por qué terminó."""
+    """Runs Python code sandboxed. Returns the output, whether it was sandboxed and why it ended."""
     with tempfile.TemporaryDirectory(prefix="llmt-sandbox-") as tmp:
         work = Path(tmp)
         script = work / "script.py"
@@ -121,11 +121,11 @@ def run_python(code: str, *, timeout_s: int = 20, memory_mb: int = 2048, allow_n
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s, cwd=tmp, env=env,
                                preexec_fn=_limits(memory_mb, timeout_s))
         except subprocess.TimeoutExpired:
-            return {"output": "", "error": f"Se superó el límite de {timeout_s} s y se detuvo el proceso.",
+            return {"output": "", "error": f"The {timeout_s} s limit was exceeded and the process was stopped.",
                     "sandboxed": available(), "timeout": True}
-        # Los archivos que deje el script se pierden con el directorio temporal (es intencionado)
+        # Files the script leaves behind go away with the temp directory (on purpose)
         out = (p.stdout or "").strip()
         err = (p.stderr or "").strip()
         if p.returncode != 0 and "MemoryError" not in err and not out:
-            err = err or f"El proceso terminó con código {p.returncode} (¿límite de memoria o de CPU?)"
+            err = err or f"The process ended with code {p.returncode} (memory or CPU limit?)"
         return {"output": out, "error": err, "sandboxed": available(), "timeout": False}

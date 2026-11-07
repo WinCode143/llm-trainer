@@ -1,4 +1,4 @@
-"""Worker de exportación: fusiona LoRA y/o convierte a GGUF. Uso: python -m app.workers.export <job_dir>/config.json"""
+"""Export worker: merges LoRA and/or converts to GGUF. Usage: python -m app.workers.export <job_dir>/config.json"""
 import os
 import shutil
 import subprocess
@@ -48,7 +48,7 @@ def main():
         hf_dir = src
         if cfg.get("is_lora"):
             hf_dir = str(out_dir / "merged")
-            em.status("Fusionando LoRA con el modelo base…")
+            em.status("Merging LoRA with the base model…")
             em.emit("progress", step=1, max_steps=3)
             merge_lora(cfg["base_model"], src, hf_dir, cfg.get("trust_remote_code", False))
             em.emit("merged", path=hf_dir)
@@ -56,13 +56,13 @@ def main():
         if cfg.get("gguf"):
             llama_dir = Path(cfg["llama_cpp_dir"]) if cfg.get("llama_cpp_dir") else None
             if not llama_dir or not (llama_dir / "convert_hf_to_gguf.py").exists():
-                raise RuntimeError("llama.cpp no está instalado: pulsa «Instalar llama.cpp» en Sistema "
-                                   "o ejecuta backend/setup-llamacpp.sh")
+                raise RuntimeError("llama.cpp isn't installed: click “Install llama.cpp” in System "
+                                   "or run backend/setup-llamacpp.sh")
             qtype = cfg.get("gguf_quant", "q4_k_m").lower()
             name = cfg.get("name", "model")
             direct = qtype in ("f16", "bf16", "q8_0")
             f16_path = out_dir / f"{name}-{'f16' if not direct else qtype}.gguf"
-            em.status("Convirtiendo a GGUF…")
+            em.status("Converting to GGUF…")
             em.emit("progress", step=2, max_steps=3)
             run_cmd([sys.executable, str(llama_dir / "convert_hf_to_gguf.py"), hf_dir, "--outfile", str(f16_path),
                      "--outtype", qtype if direct else "f16"])
@@ -70,15 +70,15 @@ def main():
             if not direct:
                 q = find_quantize(llama_dir)
                 if not q:
-                    raise RuntimeError("No se encontró el binario llama-quantize (compila llama.cpp con cmake).")
+                    raise RuntimeError("The llama-quantize binary wasn't found (build llama.cpp with cmake).")
                 final = out_dir / f"{name}-{qtype}.gguf"
                 em.status(f"Cuantizando a {qtype}…")
                 run_cmd([q, str(f16_path), str(final), qtype.upper()])
                 if not cfg.get("keep_f16"):
                     f16_path.unlink(missing_ok=True)
-            # Modelfile para importarlo en Ollama con: ollama create <nombre> -f Modelfile
+            # Modelfile to import it into Ollama with: ollama create <name> -f Modelfile
             (out_dir / "Modelfile").write_text(f"FROM ./{final.name}\n", encoding="utf-8")
-            em.status(f"GGUF listo: {final} ({final.stat().st_size / 1e9:.2f} GB)")
+            em.status(f"GGUF ready: {final} ({final.stat().st_size / 1e9:.2f} GB)")
             em.emit("gguf", path=str(final), size_gb=round(final.stat().st_size / 1e9, 2))
         em.emit("progress", step=3, max_steps=3)
         em.emit("done")

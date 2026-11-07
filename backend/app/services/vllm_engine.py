@@ -1,11 +1,11 @@
-"""Motor de inferencia vLLM.
+"""vLLM inference engine.
 
-vLLM vive en su propio entorno (.venv-vllm), así que se lanza como servidor OpenAI en un subproceso y el
-gestor de inferencia le habla por HTTP. Ventajas frente a transformers: generación mucho más rápida y, sobre
-todo, procesamiento por lotes (evaluaciones y comparaciones masivas).
+vLLM lives in its own environment (.venv-vllm), so it's launched as an OpenAI server in a subprocess and the
+inference manager talks to it over HTTP. Advantages over transformers: much faster generation and, above
+all, batch processing (bulk evaluations and comparisons).
 
-Limitaciones: no admite pesos cuantizados con bitsandbytes (usa el modelo en 16 bits o un LoRA sobre él) y
-tarda ~1 min en arrancar.
+Limitations: it doesn't support bitsandbytes-quantized weights (it uses the model in 16 bits or a LoRA on top) and
+takes ~1 min to start.
 """
 import json
 import os
@@ -29,7 +29,7 @@ def available() -> bool:
 
 
 def kill_orphans() -> int:
-    """Mata servidores vLLM de esta app que hayan quedado vivos (p. ej. tras reiniciar el backend)."""
+    """Kills this app's vLLM servers that were left running (e.g. after restarting the backend)."""
     import psutil
     killed = 0
     for p in psutil.process_iter(["cmdline"]):
@@ -42,12 +42,12 @@ def kill_orphans() -> int:
                 pass
     if killed:
         psutil.wait_procs([p for p in psutil.process_iter() if p.pid], timeout=20)
-        print(f"[vllm] {killed} servidor(es) huérfano(s) detenido(s)")
+        print(f"[vllm] stopped {killed} orphaned server(s)")
     return killed
 
 
 class VllmServer:
-    """Servidor vLLM en subproceso. `served_name` es el nombre con el que se pide el modelo."""
+    """vLLM server in a subprocess. `served_name` is the name the model is requested by."""
 
     def __init__(self, model: str, lora_path: str | None = None, max_model_len: int = 8192,
                  gpu_util: float = 0.6, log_path: Path | None = None):
@@ -60,10 +60,10 @@ class VllmServer:
                "--served-model-name", "base"]
         if lora_path:
             cmd += ["--enable-lora", "--lora-modules", f"lora={lora_path}", "--max-lora-rank", "64"]
-        kill_orphans()  # el puerto debe estar libre
+        kill_orphans()  # the port has to be free
         self.log = open(log_path or "/tmp/vllm-server.log", "ab", buffering=0)  # noqa: SIM115
-        # Sin toolkit CUDA (nvcc) FlashInfer no puede compilar sus kernels al vuelo: usamos FlashAttention
-        # y el sampler nativo de PyTorch.
+        # Without the CUDA toolkit (nvcc) FlashInfer can't compile its kernels on the fly: we use FlashAttention
+        # and PyTorch's native sampler.
         env = {**os.environ, "VLLM_LOGGING_LEVEL": "WARNING", "VLLM_ATTENTION_BACKEND": "FLASH_ATTN",
                "VLLM_USE_FLASHINFER_SAMPLER": "0"}
         self.proc = subprocess.Popen(cmd, stdout=self.log, stderr=subprocess.STDOUT, env=env, start_new_session=True)
@@ -73,7 +73,7 @@ class VllmServer:
         t0 = time.time()
         while time.time() - t0 < timeout:
             if self.proc.poll() is not None:
-                raise RuntimeError(f"vLLM terminó al arrancar (código {self.proc.returncode}); revisa /tmp/vllm-server.log")
+                raise RuntimeError(f"vLLM exited while starting (code {self.proc.returncode}); check /tmp/vllm-server.log")
             try:
                 if self.client.get("/models", timeout=3).status_code == 200:
                     return
@@ -81,7 +81,7 @@ class VllmServer:
                 pass
             time.sleep(2)
         self.stop()
-        raise RuntimeError("vLLM no arrancó a tiempo (revisa /tmp/vllm-server.log)")
+        raise RuntimeError("vLLM didn't start in time (check /tmp/vllm-server.log)")
 
     def stop(self) -> None:
         try:
@@ -95,7 +95,7 @@ class VllmServer:
             self.client.close()
             self.log.close()
 
-    # ---------------- generación ----------------
+    # ---------------- generation ----------------
     def _payload(self, messages: list[dict], params, stream: bool, template_kwargs: dict | None) -> dict:
         extra = dict(template_kwargs or {})
         if params.enable_thinking is not None:
@@ -135,7 +135,7 @@ class VllmServer:
                     continue
                 choices = chunk.get("choices") or []
                 delta = (choices[0].get("delta") or {}).get("content") if choices else None
-                # Los modelos razonadores devuelven el pensamiento en un campo aparte
+                # Reasoning models return their thinking in a separate field
                 think = (choices[0].get("delta") or {}).get("reasoning_content") if choices else None
                 if think:
                     yield think
@@ -143,7 +143,7 @@ class VllmServer:
                     yield delta
 
     def batch(self, prompts: list[list[dict]], params, template_kwargs: dict | None = None) -> list[str]:
-        """Varias conversaciones a la vez: vLLM las agrupa y es mucho más rápido que una a una."""
+        """Several conversations at once: vLLM batches them and it's much faster than one by one."""
         import concurrent.futures as cf
 
         def one(msgs):

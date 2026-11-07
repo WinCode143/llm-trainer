@@ -27,7 +27,7 @@ class Dataset(SQLModel, table=True):
 class Model(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
-    # hf (repo o carpeta local) | lora | merged | gguf
+    # hf (repo or local folder) | lora | merged | gguf
     kind: str
     path: str
     base_model: str | None = None
@@ -57,22 +57,22 @@ class RagCollection(SQLModel, table=True):
     embed_model: str
     chunk_size: int = 800
     chunk_overlap: int = 120
-    # vector | bm25 | hybrid (BM25 + vectores fusionados con RRF)
+    # vector | bm25 | hybrid (BM25 + vectors fused with RRF)
     search_mode: str = "hybrid"
-    # Cross-encoder para reordenar candidatos (None = sin reranking)
+    # Cross-encoder to reorder candidates (None = no reranking)
     reranker: str | None = None
     top_k: int = 4
-    # Umbral sobre el score final (rerank 0–1 si hay reranker; si no, similitud coseno)
+    # Threshold on the final score (rerank 0–1 if there's a reranker; otherwise cosine similarity)
     min_score: float = 0.0
-    # Si ningún fragmento supera el umbral: no_context (responder sin RAG) | refuse (decir que no está en los documentos)
+    # If no chunk passes the threshold: no_context (answer without RAG) | refuse (say it's not in the documents)
     fallback: str = "no_context"
-    # general | qa | table | laws | page | one  (cómo se trocean los documentos nuevos)
+    # general | qa | table | laws | page | one  (how new documents are chunked)
     chunk_template: str = "general"
-    # auto (pymupdf4llm/python-docx, rápido) | docling (layout y tablas con modelos de visión; PPTX/XLSX)
+    # auto (pymupdf4llm/python-docx, fast) | docling (layout and tables with vision models; PPTX/XLSX)
     parser: str = "auto"
-    # simple | multi (varias reformulaciones) | hyde (respuesta hipotética) | agentic (búsqueda iterativa)
+    # simple | multi (several rephrasings) | hyde (hypothetical answer) | agentic (iterative search)
     query_mode: str = "simple"
-    # {archivo: {"tags": [...], "url": "..."}} para filtrar la búsqueda por documento/etiqueta
+    # {file: {"tags": [...], "url": "..."}} to filter search by document/tag
     doc_meta: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     num_chunks: int = 0
     documents: list[str] = Field(default_factory=list, sa_column=Column(JSON))
@@ -80,17 +80,17 @@ class RagCollection(SQLModel, table=True):
 
 
 class QuestionSet(SQLModel, table=True):
-    """Conjunto de preguntas de evaluación, guardado para reutilizarlo.
+    """A set of evaluation questions, saved for reuse.
 
-    Antes las preguntas vivían dentro de cada ejecución: escribir veinte a mano y volver a usarlas
-    obligaba a copiarlas de un run anterior. Guardarlas aparte es lo que permite comparar modelos
-    distintos, en momentos distintos, contra la misma vara de medir."""
+    Questions used to live inside each run: writing twenty by hand and using them again
+    meant copying them from an earlier run. Saving them separately is what lets you compare different
+    models, at different times, against the same yardstick."""
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
     description: str = ""
     # [{question, expected, keywords: []}]
     questions: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
-    source: str = "manual"     # manual | generado | importado
+    source: str = "manual"     # manual | generated | imported
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)
 
@@ -111,8 +111,8 @@ class Agent(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
     description: str = ""
-    model_id: int | None = None  # modelo preferido (se carga al ejecutar si hace falta)
-    helper: int | None = None    # modelo ayudante externo; si está puesto, manda sobre model_id
+    model_id: int | None = None  # preferred model (loaded when running, if needed)
+    helper: int | None = None    # external helper model; when set, it takes precedence over model_id
     system_prompt: str = ""
     # [{"id": "web_search", "config": {...}}]
     tools: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
@@ -123,10 +123,10 @@ class Agent(SQLModel, table=True):
 
 
 class Provider(SQLModel, table=True):
-    """Modelo ayudante externo: un endpoint al que delegar generaciones auxiliares."""
+    """External helper model: an endpoint to hand auxiliary generations to."""
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
-    kind: str = "openai"  # openai (cualquier servidor compatible) | anthropic
+    kind: str = "openai"  # openai (any compatible server) | anthropic
     base_url: str = ""
     api_key: str = ""
     model: str = ""
@@ -136,28 +136,28 @@ class Provider(SQLModel, table=True):
 
 
 class McpServer(SQLModel, table=True):
-    """Servidor MCP externo registrado una vez y reutilizable por todos los agentes y flujos.
+    """External MCP server, registered once and reusable by every agent and flow.
 
-    Dos transportes: «http» (un servidor ya levantado en una URL) y «stdio» (un programa que la app
-    lanza y con el que habla por la entrada/salida estándar, que es como se distribuyen casi todos
-    los servidores MCP conocidos: npx @modelcontextprotocol/server-…, uvx mcp-server-…)."""
+    Two transports: “http” (a server already running at a URL) and “stdio” (a program the app
+    launches and talks to over standard input/output, which is how almost all well-known
+    MCP servers ship: npx @modelcontextprotocol/server-…, uvx mcp-server-…)."""
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
     transport: str = "stdio"          # stdio | http
     url: str = ""
     command: str = ""                 # p. ej. npx
     args: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    env: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))  # tokens, en claro
+    env: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON))  # tokens, in plain text
     enabled: bool = True
     note: str = ""
     created_at: datetime = Field(default_factory=now)
 
 
 class Trigger(SQLModel, table=True):
-    """Algo que lanza un flujo o un agente sin que tengas que pulsar un botón en la app.
+    """Something that runs a flow or an agent without you clicking a button in the app.
 
-    kind: webhook (una URL secreta), telegram (un bot que escucha mensajes) o schedule (una hora).
-    Un flujo que nadie puede disparar es un prototipo: esto es lo que lo conecta con el mundo."""
+    kind: webhook (a secret URL), telegram (a bot listening for messages) or schedule (a time).
+    A flow nobody can trigger is a prototype: this is what connects it to the world."""
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
     kind: str = "webhook"                 # webhook | telegram | schedule
@@ -166,20 +166,20 @@ class Trigger(SQLModel, table=True):
     # webhook: {token} · telegram: {bot_token, allowed_chat_ids} · schedule: {cada_min | diario, input, avisar_a}
     config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     enabled: bool = True
-    last_runs: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))  # últimas 20
+    last_runs: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))  # last 20
     created_at: datetime = Field(default_factory=now)
 
 
 class AgentEvalRun(SQLModel, table=True):
-    """Evaluación de un agente: ¿elige la herramienta correcta y responde bien?
+    """Agent evaluation: does it pick the right tool and answer well?
 
-    Evaluación mide modelos; esto mide agentes, donde la pregunta es otra. Con modelos pequeños lo
-    que falla no es tanto el texto como la decisión de qué herramienta usar, y eso sin medirlo sólo
-    se puede juzgar a ojo."""
+    Evaluation measures models; this measures agents, where the question is a different one. With small models
+    what fails isn't so much the text as the decision about which tool to use, and without measuring that
+    you can only judge it by eye."""
     id: int | None = Field(default=None, primary_key=True)
     agent_id: int
     name: str = ""
-    # [{question, tool, keywords}] · tool = nombre esperado o "ninguna"
+    # [{question, tool, keywords}] · tool = the expected name or "none"
     cases: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
     results: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
     summary: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
@@ -188,7 +188,7 @@ class AgentEvalRun(SQLModel, table=True):
 
 
 class Flow(SQLModel, table=True):
-    """Flujo visual: nodos y conexiones que se compilan a un grafo ejecutable."""
+    """Visual flow: nodes and connections compiled into a runnable graph."""
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
     description: str = ""
@@ -201,7 +201,7 @@ class Flow(SQLModel, table=True):
 class FlowRun(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     flow_id: int = Field(index=True)
-    # running | waiting (aprobación) | completed | failed | cancelled
+    # running | waiting (approval) | completed | failed | cancelled
     status: str = "running"
     thread_id: str = ""
     inputs: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
@@ -215,17 +215,17 @@ class FlowRun(SQLModel, table=True):
 
 class Conversation(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    title: str = "Nueva conversación"
+    title: str = "New conversation"
     # [{role, content, sources?, stats?, ragMode?}]
     messages: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
-    # ajustes del playground usados en esta conversación (modelo, rag, params, system)
+    # the playground settings used in this conversation (model, rag, params, system)
     settings: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)
 
 
 def _migrate() -> None:
-    """Añade columnas nuevas a tablas existentes (SQLite no lo hace solo con create_all)."""
+    """Adds new columns to existing tables (SQLite doesn't do it by itself with create_all)."""
     from sqlalchemy import inspect, text
 
     insp = inspect(engine)

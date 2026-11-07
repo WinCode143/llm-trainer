@@ -1,14 +1,14 @@
-"""Disparadores: lanzar un flujo o un agente sin pulsar un botón en la app.
+"""Triggers: run a flow or an agent without clicking a button in the app.
 
-Tres tipos:
-  - webhook:  una URL con un token secreto. Cualquier cosa que haga un POST lo lanza.
-  - telegram: un bot que escucha mensajes con «long polling». Las conexiones son SALIENTES, así que
-              funciona en un PC de casa sin abrir puertos ni exponer nada a internet.
-  - schedule: a una hora cada día o cada N minutos, con una entrada fija.
+Three kinds:
+    - webhook:  a URL with a secret token. Anything that sends a POST runs it.
+    - telegram: a bot that listens for messages with long polling. The connections are OUTBOUND, so
+                            it works on a home PC without opening ports or exposing anything to the internet.
+    - schedule: at a time every day or every N minutes, with a fixed input.
 
-La app no tiene autenticación (es local por diseño), así que cada disparador trae su propio
-cerrojo: el webhook, un token imposible de adivinar; Telegram, una lista de chats permitidos. Un bot
-sin lista no ejecuta nada: sólo le dice a quien le escribe cuál es su chat_id, para poder añadirlo.
+The app has no authentication (it's local by design), so each trigger brings its own
+lock: the webhook, an unguessable token; Telegram, a list of allowed chats. A bot
+without a list runs nothing: it only tells whoever messages it their chat_id, so it can be added.
 """
 from __future__ import annotations
 
@@ -25,63 +25,63 @@ from sqlmodel import Session, select
 
 from ..db import Agent, Flow, Trigger, engine, now
 
-TELEGRAM = "https://api.telegram.org/bot{token}/{metodo}"
-MAX_HISTORIAL = 20
+TELEGRAM = "https://api.telegram.org/bot{token}/{method}"
+MAX_HISTORY = 20
 
-# Aprobaciones pendientes que llegan por Telegram: clave corta -> lo necesario para reanudar
-_pendientes: dict[str, dict] = {}
-_hilos: dict[int, threading.Event] = {}      # id de disparador telegram -> señal de parada
+# Pending approvals that arrive through Telegram: short key -> what's needed to resume
+_pending: dict[str, dict] = {}
+_threads: dict[int, threading.Event] = {}      # telegram trigger id -> stop signal
 _lock = threading.Lock()
 
 
-def nuevo_token() -> str:
+def new_token() -> str:
     return secrets.token_urlsafe(24)
 
 
-# ------------------------------------------------------------------ ejecución común
+# ------------------------------------------------------------------ common execution
 
-def ejecutar(t: Trigger, texto: str, origen: str) -> dict:
-    """Corre el flujo o el agente del disparador con ese texto. Devuelve salida o pausa."""
+def execute(t: Trigger, text: str, source: str) -> dict:
+    """Runs the trigger's flow or agent with that text. Returns the output or a pause."""
     t0 = time.time()
     try:
         if t.target_kind == "agent":
-            res = _correr_agente(t.target_id, texto)
+            res = _run_agent(t.target_id, text)
         else:
-            res = _correr_flujo(t.target_id, texto)
+            res = _run_flow(t.target_id, text)
     except Exception as e:  # noqa: BLE001
         res = {"estado": "error", "salida": f"Error: {e}"}
     res["segundos"] = round(time.time() - t0, 1)
-    _anotar(t.id, {"cuando": now().isoformat(), "origen": origen, "entrada": texto[:200],
+    _log_run(t.id, {"cuando": now().isoformat(), "origen": source, "entrada": text[:200],
                    "estado": res["estado"], "salida": str(res.get("salida", ""))[:400], "segundos": res["segundos"]})
     return res
 
 
-def _correr_flujo(fid: int, texto: str, thread_id: str | None = None, resume: Any = None) -> dict:
+def _run_flow(fid: int, text: str, thread_id: str | None = None, resume: Any = None) -> dict:
     from . import flows as flows_svc
     with Session(engine, expire_on_commit=False) as s:
         f = s.get(Flow, fid)
     if not f:
-        raise RuntimeError(f"El flujo #{fid} ya no existe")
+        raise RuntimeError(f"Flow #{fid} no longer exists")
     tid = thread_id or f"trig-{uuid.uuid4().hex[:10]}"
-    entrada = {"entrada": texto, "_entrada": texto}
-    for ev in flows_svc.run(f.spec, entrada, thread_id=tid, resume=resume):
+    inputs = {"input": text, "_input": text}
+    for ev in flows_svc.run(f.spec, inputs, thread_id=tid, resume=resume):
         if ev["type"] == "interrupt":
-            return {"estado": "espera", "salida": ev["data"], "thread_id": tid, "flow_id": fid}
+            return {"estado": "waiting", "salida": ev["data"], "thread_id": tid, "flow_id": fid}
         if ev["type"] == "done":
-            return {"estado": "ok", "salida": ev.get("output") or (ev.get("vars") or {}).get("_salida", "")}
+            return {"estado": "ok", "salida": ev.get("output") or (ev.get("vars") or {}).get("_output", "")}
         if ev["type"] == "error":
             return {"estado": "error", "salida": ev["message"]}
-    return {"estado": "error", "salida": "El flujo terminó sin salida"}
+    return {"estado": "error", "salida": "The flow ended without output"}
 
 
-def _correr_agente(aid: int, texto: str) -> dict:
+def _run_agent(aid: int, text: str) -> dict:
     from .agents import run as run_agent
     with Session(engine) as s:
         a = s.get(Agent, aid)
     if not a:
-        raise RuntimeError(f"El agente #{aid} ya no existe")
+        raise RuntimeError(f"Agent #{aid} no longer exists")
     final = ""
-    for ev in run_agent(a.model_dump(), [{"role": "user", "content": texto}]):
+    for ev in run_agent(a.model_dump(), [{"role": "user", "content": text}]):
         if ev["type"] == "done":
             final = ev["final"]
         elif ev["type"] == "error":
@@ -89,19 +89,19 @@ def _correr_agente(aid: int, texto: str) -> dict:
     return {"estado": "ok", "salida": final}
 
 
-def _anotar(tid: int, fila: dict) -> None:
+def _log_run(tid: int, row: dict) -> None:
     with Session(engine) as s:
         t = s.get(Trigger, tid)
         if t:
-            t.last_runs = ([fila] + list(t.last_runs or []))[:MAX_HISTORIAL]
+            t.last_runs = ([row] + list(t.last_runs or []))[:MAX_HISTORY]
             s.add(t)
             s.commit()
 
 
 # ------------------------------------------------------------------ webhook
 
-def buscar_webhook(token: str) -> Trigger | None:
-    """Busca por token en tiempo constante, para no filtrar por el tiempo de respuesta."""
+def find_webhook(token: str) -> Trigger | None:
+    """Looks up the token in constant time, so response time leaks nothing."""
     with Session(engine, expire_on_commit=False) as s:
         for t in s.exec(select(Trigger).where(Trigger.kind == "webhook", Trigger.enabled == True)).all():  # noqa: E712
             if hmac.compare_digest(str(t.config.get("token", "")), token):
@@ -111,90 +111,90 @@ def buscar_webhook(token: str) -> Trigger | None:
 
 # ------------------------------------------------------------------ telegram
 
-def tg(token: str, metodo: str, **datos) -> dict:
-    r = httpx.post(TELEGRAM.format(token=token, metodo=metodo), json=datos, timeout=40)
+def tg(token: str, method: str, **data) -> dict:
+    r = httpx.post(TELEGRAM.format(token=token, method=method), json=data, timeout=40)
     d = r.json()
     if not d.get("ok"):
-        raise RuntimeError(d.get("description") or f"Telegram respondió {r.status_code}")
+        raise RuntimeError(d.get("description") or f"Telegram answered {r.status_code}")
     return d.get("result")
 
 
-def procesar_update(t: Trigger, upd: dict, enviar: Callable[..., Any]) -> str | None:
-    """Atiende un mensaje o una pulsación de botón. Separado del bucle para poder probarlo sin red.
+def handle_update(t: Trigger, upd: dict, send: Callable[..., Any]) -> str | None:
+    """Handles a message or a button press. Separate from the loop so it can be tested without a network.
 
-    `enviar(metodo, **datos)` es la llamada a la API de Telegram. Devuelve qué se hizo, para registro."""
-    permitidos = {int(x) for x in (t.config.get("allowed_chat_ids") or []) if str(x).lstrip("-").isdigit()}
+    `send(method, **data)` is the call to the Telegram API. Returns what was done, for the log."""
+    allowed = {int(x) for x in (t.config.get("allowed_chat_ids") or []) if str(x).lstrip("-").isdigit()}
 
-    # Un botón de Aprobar/Rechazar de un flujo detenido
+    # An Approve/Reject button from a paused flow
     if "callback_query" in upd:
         cq = upd["callback_query"]
         chat = cq["message"]["chat"]["id"]
-        if chat not in permitidos:
-            return "botón de un chat no permitido: ignorado"
-        accion, _, clave = (cq.get("data") or "").partition(":")
+        if chat not in allowed:
+            return "button from a chat that isn't allowed: ignored"
+        action, _, key = (cq.get("data") or "").partition(":")
         with _lock:
-            p = _pendientes.pop(clave, None)
-        enviar("answerCallbackQuery", callback_query_id=cq["id"])
+            p = _pending.pop(key, None)
+        send("answerCallbackQuery", callback_query_id=cq["id"])
         if not p:
-            enviar("sendMessage", chat_id=chat, text="Esa aprobación ya no está pendiente.")
-            return "aprobación caducada"
-        res = _correr_flujo(p["flow_id"], p["texto"], thread_id=p["thread_id"],
-                            resume={"rejected": accion != "ok", "comment": "desde Telegram", "edited": None})
-        _responder(t, chat, res, p["texto"], enviar)
-        return f"aprobación {'aceptada' if accion == 'ok' else 'rechazada'}"
+            send("sendMessage", chat_id=chat, text="That approval is no longer pending.")
+            return "approval expired"
+        res = _run_flow(p["flow_id"], p["texto"], thread_id=p["thread_id"],
+                            resume={"rejected": action != "ok", "comment": "from Telegram", "edited": None})
+        _reply(t, chat, res, p["texto"], send)
+        return f"approval {'accepted' if action == 'ok' else 'rejected'}"
 
     msg = upd.get("message") or {}
-    texto = (msg.get("text") or "").strip()
+    text = (msg.get("text") or "").strip()
     chat = (msg.get("chat") or {}).get("id")
-    if not chat or not texto:
+    if not chat or not text:
         return None
 
-    if not permitidos:
-        # Sin lista no se ejecuta nada. Decirle su id es lo que permite configurarlo.
-        enviar("sendMessage", chat_id=chat, text=(
-            f"Este bot aún no tiene chats permitidos. Tu chat_id es {chat}: añádelo en LLM Trainer → "
-            "Conexiones → Disparadores para poder usarlo."))
-        return f"sin lista: se le dijo su chat_id a {chat}"
-    if chat not in permitidos:
-        return f"chat {chat} no permitido: ignorado en silencio"
+    if not allowed:
+        # Without a list nothing runs. Telling them their id is what lets them set it up.
+        send("sendMessage", chat_id=chat, text=(
+            f"This bot has no allowed chats yet. Your chat_id is {chat}: add it in LLM Trainer → "
+            "Connections → Triggers to use it."))
+        return f"no list: told {chat} their chat_id"
+    if chat not in allowed:
+        return f"chat {chat} not allowed: silently ignored"
 
-    if texto in ("/start", "/help"):
-        enviar("sendMessage", chat_id=chat, text=f"Hola. Escríbeme y se lo paso a «{_destino(t)}».")
-        return "ayuda"
+    if text in ("/start", "/help"):
+        send("sendMessage", chat_id=chat, text=f"Hi. Write to me and I'll pass it on to “{_target_name(t)}”.")
+        return "help"
 
-    enviar("sendChatAction", chat_id=chat, action="typing")
-    res = ejecutar(t, texto, f"telegram:{chat}")
-    _responder(t, chat, res, texto, enviar)
+    send("sendChatAction", chat_id=chat, action="typing")
+    res = execute(t, text, f"telegram:{chat}")
+    _reply(t, chat, res, text, send)
     return res["estado"]
 
 
-def _responder(t: Trigger, chat: int, res: dict, texto: str, enviar) -> None:
-    if res["estado"] == "espera":
-        # El flujo llegó a un nodo de Aprobación: se pregunta por Telegram con dos botones
+def _reply(t: Trigger, chat: int, res: dict, text: str, send) -> None:
+    if res["estado"] == "waiting":
+        # The flow reached an Approval node: ask through Telegram with two buttons
         d = res["salida"] or {}
-        clave = uuid.uuid4().hex[:12]
+        key = uuid.uuid4().hex[:12]
         with _lock:
-            _pendientes[clave] = {"flow_id": res["flow_id"], "thread_id": res["thread_id"], "texto": texto}
-        cuerpo = f"{d.get('message') or '¿Continuamos?'}\n\n{str(d.get('preview') or '')[:3000]}"
-        enviar("sendMessage", chat_id=chat, text=cuerpo, reply_markup={"inline_keyboard": [[
-            {"text": "✅ Aprobar", "callback_data": f"ok:{clave}"},
-            {"text": "❌ Rechazar", "callback_data": f"no:{clave}"}]]})
+            _pending[key] = {"flow_id": res["flow_id"], "thread_id": res["thread_id"], "texto": text}
+        body = f"{d.get('message') or 'Shall we continue?'}\n\n{str(d.get('preview') or '')[:3000]}"
+        send("sendMessage", chat_id=chat, text=body, reply_markup={"inline_keyboard": [[
+            {"text": "✅ Approve", "callback_data": f"ok:{key}"},
+            {"text": "❌ Reject", "callback_data": f"no:{key}"}]]})
         return
-    salida = str(res.get("salida") or "(sin respuesta)")
-    # Telegram corta a 4096 caracteres por mensaje
-    for i in range(0, len(salida), 4000):
-        enviar("sendMessage", chat_id=chat, text=salida[i:i + 4000])
+    output = str(res.get("salida") or "(no answer)")
+    # Telegram cuts messages at 4096 characters
+    for i in range(0, len(output), 4000):
+        send("sendMessage", chat_id=chat, text=output[i:i + 4000])
 
 
-def _destino(t: Trigger) -> str:
+def _target_name(t: Trigger) -> str:
     with Session(engine) as s:
         obj = s.get(Agent if t.target_kind == "agent" else Flow, t.target_id)
     return obj.name if obj else f"{t.target_kind} #{t.target_id}"
 
 
-def _bucle_telegram(tid: int, parar: threading.Event) -> None:
+def _telegram_loop(tid: int, stop: threading.Event) -> None:
     offset = 0
-    while not parar.is_set():
+    while not stop.is_set():
         with Session(engine, expire_on_commit=False) as s:
             t = s.get(Trigger, tid)
         if not t or not t.enabled:
@@ -203,66 +203,66 @@ def _bucle_telegram(tid: int, parar: threading.Event) -> None:
         try:
             updates = tg(token, "getUpdates", offset=offset, timeout=30, allowed_updates=["message", "callback_query"])
         except Exception as e:  # noqa: BLE001
-            print(f"[telegram] «{t.name}»: {e}; reintento en 15 s")
-            parar.wait(15)
+            print(f"[telegram] “{t.name}”: {e}; retrying in 15 s")
+            stop.wait(15)
             continue
         for u in updates or []:
             offset = u["update_id"] + 1
             try:
-                hecho = procesar_update(t, u, lambda metodo, **d: tg(token, metodo, **d))
-                if hecho:
-                    print(f"[telegram] «{t.name}»: {hecho}")
+                done = handle_update(t, u, lambda method, **d: tg(token, method, **d))
+                if done:
+                    print(f"[telegram] “{t.name}”: {done}")
             except Exception as e:  # noqa: BLE001
-                print(f"[telegram] «{t.name}» al procesar un mensaje: {e}")
+                print(f"[telegram] “{t.name}” while handling a message: {e}")
 
 
-def arrancar_telegram(tid: int) -> None:
-    parar_telegram(tid)
+def start_telegram(tid: int) -> None:
+    stop_telegram(tid)
     ev = threading.Event()
-    _hilos[tid] = ev
-    threading.Thread(target=_bucle_telegram, args=(tid, ev), daemon=True, name=f"telegram-{tid}").start()
+    _threads[tid] = ev
+    threading.Thread(target=_telegram_loop, args=(tid, ev), daemon=True, name=f"telegram-{tid}").start()
 
 
-def parar_telegram(tid: int) -> None:
-    ev = _hilos.pop(tid, None)
+def stop_telegram(tid: int) -> None:
+    ev = _threads.pop(tid, None)
     if ev:
         ev.set()
 
 
-# ------------------------------------------------------------------ programados
+# ------------------------------------------------------------------ scheduled
 
-def toca(cfg: dict, ultima: datetime | None, ahora: datetime) -> bool:
-    """¿Le toca ejecutarse? «cada_min» cada N minutos, o «diario» a una hora HH:MM."""
+def is_due(cfg: dict, last: datetime | None, now_: datetime) -> bool:
+    """Is it due? “cada_min” every N minutes, or “diario” at a time HH:MM."""
     if cfg.get("cada_min"):
-        return ultima is None or (ahora - ultima).total_seconds() >= int(cfg["cada_min"]) * 60
+        return last is None or (now_ - last).total_seconds() >= int(cfg["cada_min"]) * 60
     if cfg.get("diario"):
         hh, mm = (int(x) for x in str(cfg["diario"]).split(":"))
-        objetivo = ahora.replace(hour=hh, minute=mm, second=0, microsecond=0)
-        return ahora >= objetivo and (ultima is None or ultima < objetivo)
+        target = now_.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        return now_ >= target and (last is None or last < target)
     return False
 
 
-def _bucle_programados() -> None:
+def _schedule_loop() -> None:
     while True:
-        ahora = datetime.now()
+        now_ = datetime.now()
         with Session(engine, expire_on_commit=False) as s:
-            programados = s.exec(select(Trigger).where(Trigger.kind == "schedule", Trigger.enabled == True)).all()  # noqa: E712
-        for t in programados:
-            ultima = None
+            scheduled = s.exec(select(Trigger).where(Trigger.kind == "schedule", Trigger.enabled == True)).all()  # noqa: E712
+        for t in scheduled:
+            last = None
             if t.last_runs:
                 try:
-                    ultima = datetime.fromisoformat(t.last_runs[0]["cuando"]).replace(tzinfo=None)
+                    last = datetime.fromisoformat(t.last_runs[0]["cuando"]).replace(tzinfo=None)
                 except (KeyError, ValueError):
-                    ultima = None
-            if not toca(t.config, ultima, ahora):
+                    last = None
+            if not is_due(t.config, last, now_):
                 continue
-            res = ejecutar(t, t.config.get("input") or "", "programado")
-            _avisar(t, res)
+            res = execute(t, t.config.get("input") or "", "scheduled")
+            _notify(t, res)
         time.sleep(30)
 
 
-def _avisar(t: Trigger, res: dict) -> None:
-    """Un resultado programado que nadie ve no sirve: se manda al chat de un bot de Telegram."""
+def _notify(t: Trigger, res: dict) -> None:
+    """A scheduled result nobody sees is useless: it's sent to a Telegram bot's chat."""
     bot_id = t.config.get("avisar_a")
     if not bot_id:
         return
@@ -272,14 +272,14 @@ def _avisar(t: Trigger, res: dict) -> None:
         return
     for chat in bot.config.get("allowed_chat_ids") or []:
         try:
-            _responder(bot, int(chat), res, t.config.get("input") or "", lambda m, **d: tg(bot.config["bot_token"], m, **d))
+            _reply(bot, int(chat), res, t.config.get("input") or "", lambda m, **d: tg(bot.config["bot_token"], m, **d))
         except Exception as e:  # noqa: BLE001
-            print(f"[programado] no se pudo avisar por Telegram: {e}")
+            print(f"[scheduled] couldn't notify through Telegram: {e}")
 
 
-def arrancar_todo() -> None:
-    """Al arrancar la app: un hilo por bot de Telegram activo y uno para los programados."""
+def start_all() -> None:
+    """On app start: one thread per active Telegram bot and one for the schedules."""
     with Session(engine) as s:
         for t in s.exec(select(Trigger).where(Trigger.kind == "telegram", Trigger.enabled == True)).all():  # noqa: E712
-            arrancar_telegram(t.id)
-    threading.Thread(target=_bucle_programados, daemon=True, name="programados").start()
+            start_telegram(t.id)
+    threading.Thread(target=_schedule_loop, daemon=True, name="schedules").start()

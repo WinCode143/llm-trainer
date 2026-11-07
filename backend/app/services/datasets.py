@@ -1,6 +1,6 @@
-"""Importación y normalización de datasets.
+"""Importing and normalizing datasets.
 
-Todo se guarda como JSONL en uno de tres formatos canónicos:
+Everything is stored as JSONL in one of three canonical formats:
   chat:       {"messages": [{"role": "system|user|assistant", "content": "..."}]}
   text:       {"text": "..."}
   preference: {"prompt": "...", "chosen": "...", "rejected": "..."}
@@ -32,7 +32,7 @@ def _read_records(filename: str, raw: bytes) -> list[dict[str, Any]]:
     if ext == ".json":
         data = json.loads(text)
         if isinstance(data, dict):
-            # {"data": [...]} u otra clave con lista
+            # {"data": [...]} or another key holding a list
             for v in data.values():
                 if isinstance(v, list):
                     return v
@@ -44,9 +44,9 @@ def _read_records(filename: str, raw: bytes) -> list[dict[str, Any]]:
         import pandas as pd
         return pd.read_parquet(io.BytesIO(raw)).to_dict(orient="records")
     if ext in (".txt", ".md"):
-        # Texto plano: un ejemplo por párrafo (separado por líneas en blanco)
+        # Plain text: one example per paragraph (separated by blank lines)
         return [{"text": p.strip()} for p in re.split(r"\n\s*\n", text) if p.strip()]
-    raise ValueError(f"Extensión no soportada: {ext}")
+    raise ValueError(f"Unsupported extension: {ext}")
 
 
 def detect_format(rec: dict[str, Any]) -> str:
@@ -59,7 +59,7 @@ def detect_format(rec: dict[str, Any]) -> str:
         return "chat"
     if "text" in keys:
         return "text"
-    raise ValueError(f"No se reconoce el formato del registro. Claves: {sorted(keys)}")
+    raise ValueError(f"The record's format isn't recognized. Keys: {sorted(keys)}")
 
 
 def _to_chat(rec: dict[str, Any], system_prompt: str | None) -> dict | None:
@@ -92,7 +92,7 @@ def _to_chat(rec: dict[str, Any], system_prompt: str | None) -> dict | None:
 
 
 def _flatten(v: Any) -> str:
-    # chosen/rejected pueden venir como lista de mensajes
+    # chosen/rejected may come as a list of messages
     if isinstance(v, list):
         return next((str(m.get("content", "")) for m in reversed(v) if m.get("role") == "assistant"), "")
     return str(v)
@@ -101,7 +101,7 @@ def _flatten(v: Any) -> str:
 def normalize(records: Iterable[dict[str, Any]], fmt: str | None = None, system_prompt: str | None = None) -> tuple[str, list[dict]]:
     records = list(records)
     if not records:
-        raise ValueError("El dataset está vacío")
+        raise ValueError("The dataset is empty")
     fmt = fmt or detect_format(records[0])
     out: list[dict] = []
     for rec in records:
@@ -116,11 +116,11 @@ def normalize(records: Iterable[dict[str, Any]], fmt: str | None = None, system_
                 prompt = next((m.get("content", "") for m in prompt if m.get("role") == "user"), "")
             r = {"prompt": str(prompt), "chosen": _flatten(rec["chosen"]), "rejected": _flatten(rec["rejected"])}
         else:
-            raise ValueError(f"Formato desconocido: {fmt}")
+            raise ValueError(f"Unknown format: {fmt}")
         if r:
             out.append(r)
     if not out:
-        raise ValueError("Ningún registro válido tras la normalización")
+        raise ValueError("No valid record left after normalization")
     return fmt, out
 
 

@@ -14,23 +14,23 @@ export default function Evaluation() {
   return (
     <>
       <div className="page-head">
-        <div><h1>Evaluación</h1><div className="sub">Mide cómo responden tus modelos a una batería de preguntas</div></div>
-        <button className="primary" onClick={() => setSel("new")}>Nueva evaluación</button>
+        <div><h1>Evaluation</h1><div className="sub">Measure how your models answer a set of questions</div></div>
+        <button className="primary" onClick={() => setSel("new")}>New evaluation</button>
       </div>
-      <Help title="¿Cómo se evalúa y qué significan las métricas?">
-        <p>Defines una batería de preguntas (a mano, importadas de un dataset o <b>generadas desde tus documentos</b>) y la app las pasa por los modelos que elijas, <b>con y sin RAG</b>, para responder a la pregunta clave: ¿qué combinación responde mejor?</p>
+      <Help title="How does evaluation work, and what do the metrics mean?">
+        <p>You define a set of questions (by hand, imported from a dataset or <b>generated from your documents</b>) and the app runs them through the models you choose, <b>with and without RAG</b>, to answer the key question: which combination answers best?</p>
         <ul>
-          <li><b>Corrección (juez)</b>: otro modelo puntúa de 1 a 10 comparando con tu respuesta de referencia.</li>
-          <li><b>Similitud</b>: parecido semántico con la referencia · <b>Palabras clave</b>: si aparecen los datos que pediste.</li>
-          <li><b>Fidelidad</b>: si lo que afirma está respaldado por el contexto recuperado (detecta alucinaciones).</li>
-          <li><b>Relevancia y recall del contexto</b>: si la búsqueda trajo lo pertinente.</li>
-          <li>Puntúa tú con estrellas y la app te dirá <b>cuánto coincide el juez contigo</b>.</li>
+          <li><b>Correctness (judge)</b>: another model scores 1 to 10 against your reference answer.</li>
+          <li><b>Similarity</b>: semantic closeness to the reference · <b>Keywords</b>: whether the facts you asked for appear.</li>
+          <li><b>Faithfulness</b>: whether what it claims is backed by the retrieved context (catches hallucinations).</li>
+          <li><b>Context relevance and recall</b>: whether retrieval brought back what was needed.</li>
+          <li>Rate answers yourself with stars and the app will tell you <b>how much the judge agrees with you</b>.</li>
         </ul>
-        <p style={{ marginTop: 8 }}>Con el motor vLLM cargado, las respuestas se generan por lotes y la evaluación va ~6× más rápido.</p>
+        <p style={{ marginTop: 8 }}>With the vLLM engine loaded, answers are generated in batches and evaluation runs ~6× faster.</p>
       </Help>
       <div className="split" style={{ gridTemplateColumns: "260px minmax(0,1fr)" }}>
         <div className="card" style={{ padding: 8 }}>
-          {!runs?.length && <div className="empty">Sin evaluaciones</div>}
+          {!runs?.length && <div className="empty">No evaluations</div>}
           <table><tbody>
             {runs?.map((r) => (
               <tr key={r.id} className={`clickable ${sel === r.id ? "selected" : ""}`} onClick={() => setSel(r.id)}>
@@ -51,7 +51,7 @@ function parseQuestions(text: string): Q[] {
   if (!t) return [];
   if (t.startsWith("[")) return JSON.parse(t);
   if (t.startsWith("{")) return t.split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  // Formato simple: pregunta | respuesta esperada | palabra1, palabra2
+  // Simple format: question | expected answer | keyword1, keyword2
   return t.split("\n").filter((l) => l.trim()).map((l) => {
     const [question, expected, kw] = l.split("|").map((s) => s.trim());
     return { question, expected: expected || undefined, keywords: kw ? kw.split(",").map((s) => s.trim()).filter(Boolean) : [] };
@@ -68,11 +68,11 @@ function NewEval({ onCreated }: { onCreated: (id: number) => void }) {
   const [system, setSystem] = useState("");
   const [rag, setRag] = useState<number | "">("");
   const [ragModes, setRagModes] = useState<string[]>(["off", "on"]);
-  const [ragK, setRagK] = useState(0); // 0 = top_k de la colección
+  const [ragK, setRagK] = useState(0); // 0 = the collection's top_k
   const [judge, setJudge] = useState<number | "">("");
   const [judgeHelper, setJudgeHelper] = useState<number | null>(null);
-  const [nombreSet, setNombreSet] = useState("");
-  const [sets, recargarSets] = useData<any[]>("/api/question-sets");
+  const [saveAs, setSaveAs] = useState("");
+  const [sets, reloadSets] = useData<any[]>("/api/question-sets");
   const [temp, setTemp] = useState(0.2);
   const [maxTok, setMaxTok] = useState(512);
   const [noThink, setNoThink] = useState(true);
@@ -124,24 +124,24 @@ function NewEval({ onCreated }: { onCreated: (id: number) => void }) {
 
   return (
     <div className="card stack" style={{ gap: 14 }}>
-      <h2 style={{ margin: 0 }}>Nueva evaluación</h2>
+      <h2 style={{ margin: 0 }}>New evaluation</h2>
       <div className="grid g2">
-        <Field label="Nombre"><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-        <Field label="Importar preguntas de un dataset" hint="Usa el último turno de usuario como pregunta y la respuesta como referencia">
+        <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+        <Field label="Import questions from a dataset" hint="Uses the last user turn as the question and the answer as the reference">
           <select value="" onChange={(e) => e.target.value && fromDataset(+e.target.value)}>
-            <option value="">— elige —</option>
+            <option value="">— choose —</option>
             {datasets?.filter((d) => d.format !== "text").map((d) => <option key={d.id} value={d.id}>{d.name} ({d.num_rows})</option>)}
           </select>
         </Field>
       </div>
       <div className="row source" style={{ padding: "8px 10px" }}>
-        <span className="sub">¿Sin preguntas? Genéralas desde tus documentos con el modelo cargado:</span>
+        <span className="sub">No questions? Generate them from your documents with the loaded model:</span>
         <select value={genColl} onChange={(e) => setGenColl(e.target.value ? +e.target.value : "")} style={{ width: "auto" }}>
-          <option value="">— colección —</option>{cols?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          <option value="">— collection —</option>{cols?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <button className="sm" disabled={!genColl || genBusy} onClick={fromCollection}>{genBusy ? "Generando…" : "Generar ~20 preguntas"}</button>
+        <button className="sm" disabled={!genColl || genBusy} onClick={fromCollection}>{genBusy ? "Generating…" : "Generate ~20 questions"}</button>
       </div>
-      <Field label="Modelos">
+      <Field label="Models">
         <div className="row" style={{ gap: 14 }}>
           {models?.filter((m) => m.kind !== "embedding").map((m) => (
             <label key={m.id} className="check"><input type="checkbox" checked={sel.includes(m.id)} onChange={(e) => setSel(e.target.checked ? [...sel, m.id] : sel.filter((x) => x !== m.id))} />{m.name}</label>
@@ -150,92 +150,92 @@ function NewEval({ onCreated }: { onCreated: (id: number) => void }) {
       </Field>
       <div className="card" style={{ padding: "8px 10px", marginBottom: 8 }}>
         <div className="row between">
-          <b style={{ fontSize: 13 }}>Conjuntos de preguntas guardados</b>
-          <button className="sm" disabled={!questions.length || !nombreSet.trim()}
+          <b style={{ fontSize: 13 }}>Saved question sets</b>
+          <button className="sm" disabled={!questions.length || !saveAs.trim()}
             onClick={async () => {
               try {
-                await api.post("/api/question-sets", { name: nombreSet.trim(), questions, source: "manual" });
-                setNombreSet(""); recargarSets(); notify("Conjunto guardado");
+                await api.post("/api/question-sets", { name: saveAs.trim(), questions, source: "manual" });
+                setSaveAs(""); reloadSets(); notify("Set saved");
               } catch (e: any) { notify(e.message, "err"); }
-            }}>Guardar estas {questions.length}</button>
+            }}>Save these {questions.length}</button>
         </div>
         <div className="sub" style={{ marginTop: 4 }}>
-          Escribe tus preguntas una vez y reutilízalas: es lo que convierte las comparaciones en
-          decisiones, porque todos los modelos se miden con la misma vara.
+          Write your questions once and reuse them: that's what turns comparisons into
+          decisions, because every model is measured against the same yardstick.
         </div>
         <div className="row" style={{ gap: 6, marginTop: 6 }}>
           <select value="" onChange={async (e) => {
             if (!e.target.value) return;
             const qs = await api.get<any>(`/api/question-sets/${e.target.value}`);
             setText(qs.questions.map((q: any) => JSON.stringify(q)).join("\n"));
-            notify(`${qs.questions.length} preguntas cargadas de «${qs.name}»`);
+            notify(`${qs.questions.length} questions loaded from “${qs.name}”`);
           }}>
-            <option value="">Cargar un conjunto…</option>
-            {sets?.map((q) => <option key={q.id} value={q.id}>{q.name} ({q.n}, {q.con_referencia} con referencia)</option>)}
+            <option value="">Load a set…</option>
+            {sets?.map((q) => <option key={q.id} value={q.id}>{q.name} ({q.n}, {q.con_referencia} with a reference)</option>)}
           </select>
-          <input placeholder="nombre para guardar las de abajo" value={nombreSet} onChange={(e) => setNombreSet(e.target.value)} />
+          <input placeholder="name to save the ones below" value={saveAs} onChange={(e) => setSaveAs(e.target.value)} />
         </div>
       </div>
 
-      <Field label={`Preguntas (${questions.length})`} hint="Una por línea: pregunta | respuesta esperada | palabra clave 1, palabra clave 2 — o JSONL/JSON con {question, expected, keywords}">
+      <Field label={`Questions (${questions.length})`} hint="One per line: question | expected answer | keyword 1, keyword 2 — or JSONL/JSON with {question, expected, keywords}">
         <textarea rows={8} className="mono" value={text} onChange={(e) => setText(e.target.value)}
-          placeholder={"¿Cuál es la capital de Francia? | París es la capital de Francia. | París\n¿Cuánto es 7×8? | 56 | 56"} />
+          placeholder={"What is the capital of France? | Paris is the capital of France. | Paris\nWhat is 7×8? | 56 | 56"} />
       </Field>
       {parseErr && <div className="error-box">{parseErr}</div>}
       <div className="grid g2">
-        <Field label="System prompt (opcional)"><textarea rows={2} value={system} onChange={(e) => setSystem(e.target.value)} /></Field>
+        <Field label="System prompt (optional)"><textarea rows={2} value={system} onChange={(e) => setSystem(e.target.value)} /></Field>
         <div className="stack">
-          <Field label="Con RAG (opcional)">
+          <Field label="With RAG (optional)">
             <select value={rag} onChange={(e) => setRag(e.target.value ? +e.target.value : "")}>
               <option value="">Sin RAG</option>{cols?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </Field>
           {rag && (
             <div className="row" style={{ gap: 14 }}>
-              {[["off", "Evaluar sin RAG"], ["on", "Evaluar con RAG"]].map(([v, l]) => (
+              {[["off", "Evaluate without RAG"], ["on", "Evaluate with RAG"]].map(([v, l]) => (
                 <label key={v} className="check"><input type="checkbox" checked={ragModes.includes(v)}
                   onChange={(e) => setRagModes(e.target.checked ? [...ragModes, v] : ragModes.filter((x) => x !== v))} />{l}</label>
               ))}
-              <label className="field" style={{ flex: 1, minWidth: 120 }}>Fragmentos: {ragK || "los de la colección"}
+              <label className="field" style={{ flex: 1, minWidth: 120 }}>Chunks: {ragK || "the collection's default"}
                 <input type="range" min={0} max={10} value={ragK} onChange={(e) => setRagK(+e.target.value)} /></label>
             </div>
           )}
-          <Field label="Modelo juez (LLM-as-judge, opcional)" hint="Puntúa 1–10 cada respuesta frente a la referencia. Usa un modelo capaz.">
+          <Field label="Judge model (LLM-as-judge, optional)" hint="Scores each answer 1–10 against the reference. Use a capable model.">
             <select value={judge} disabled={!!judgeHelper} onChange={(e) => setJudge(e.target.value ? +e.target.value : "")}>
-              <option value="">Sin juez</option>{models?.filter((m) => m.kind !== "embedding").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              <option value="">No judge</option>{models?.filter((m) => m.kind !== "embedding").map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </Field>
-          <HelperPicker value={judgeHelper} onChange={setJudgeHelper} label="…o un juez externo"
-            hint="No ocupa VRAM ni obliga a descargar el modelo evaluado, así que la evaluación va más rápida" />
+          <HelperPicker value={judgeHelper} onChange={setJudgeHelper} label="…or an external judge"
+            hint="It uses no VRAM and doesn't force the evaluated model to be unloaded, so evaluation runs faster" />
         </div>
       </div>
       <Adv>
         <div className="grid g2">
-          <Field label={`Temperatura: ${temp}`}><input type="range" min={0} max={1.5} step={0.05} value={temp} onChange={(e) => setTemp(+e.target.value)} /></Field>
-          <Field label={`Máx. tokens: ${maxTok}`}><input type="range" min={32} max={2048} step={32} value={maxTok} onChange={(e) => setMaxTok(+e.target.value)} /></Field>
+          <Field label={`Temperature: ${temp}`}><input type="range" min={0} max={1.5} step={0.05} value={temp} onChange={(e) => setTemp(+e.target.value)} /></Field>
+          <Field label={`Max tokens: ${maxTok}`}><input type="range" min={32} max={2048} step={32} value={maxTok} onChange={(e) => setMaxTok(+e.target.value)} /></Field>
         </div>
       </Adv>
-      <SimpleNote>Se generan las respuestas con temperatura {temp} y hasta {maxTok} tokens.</SimpleNote>
-      <div className="row"><label className="check" title="Evita que modelos como Qwen3 gasten tokens en <think>; más rápido y comparable"><input type="checkbox" checked={noThink} onChange={(e) => setNoThink(e.target.checked)} />Desactivar razonamiento</label><div className="spacer" />{rag && ragModes.length === 2 && <span className="sub">Matriz: {sel.length} modelo(s) × 2 modos = {sel.length * 2} variantes · {sel.length * 2 * questions.length} respuestas</span>}
-        <button className="primary" disabled={!sel.length || !questions.length || !!parseErr || (!!rag && !ragModes.length)} onClick={run}><Play size={14} /> Ejecutar</button></div>
+      <SimpleNote>Answers are generated at temperature {temp} with up to {maxTok} tokens.</SimpleNote>
+      <div className="row"><label className="check" title="Keeps models like Qwen3 from spending tokens on <think>; faster and comparable"><input type="checkbox" checked={noThink} onChange={(e) => setNoThink(e.target.checked)} />Turn off reasoning</label><div className="spacer" />{rag && ragModes.length === 2 && <span className="sub">Matrix: {sel.length} model(s) × 2 modes = {sel.length * 2} variants · {sel.length * 2 * questions.length} answers</span>}
+        <button className="primary" disabled={!sel.length || !questions.length || !!parseErr || (!!rag && !ragModes.length)} onClick={run}><Play size={14} /> Run</button></div>
     </div>
   );
 }
 
 type Metric = { key: string; label: string; help: string; scale: number; rag?: boolean };
 const METRICS: Metric[] = [
-  { key: "judge_score", label: "Corrección (juez)", help: "El modelo juez puntúa 1–10 la respuesta frente a la referencia", scale: 10 },
-  { key: "similarity", label: "Similitud", help: "Similitud semántica (embeddings) entre respuesta y referencia", scale: 1 },
-  { key: "keyword_score", label: "Palabras clave", help: "Fracción de palabras clave presentes en la respuesta", scale: 1 },
-  { key: "answer_relevance", label: "Relevancia", help: "Similitud entre pregunta y respuesta: ¿responde a lo que se preguntó?", scale: 1 },
-  { key: "faithfulness", label: "Fidelidad", help: "El juez puntúa 1–10 si lo afirmado está respaldado por el contexto (bajo = alucina)", scale: 10, rag: true },
-  { key: "context_relevance", label: "Relevancia contexto", help: "Score medio de los fragmentos recuperados: ¿el retriever trajo algo pertinente?", scale: 1, rag: true },
-  { key: "context_recall", label: "Recall contexto", help: "¿Algún fragmento recuperado contiene la respuesta de referencia?", scale: 1, rag: true },
-  { key: "rating", label: "Tu nota", help: "Tu valoración media (1–5 estrellas)", scale: 5 },
+  { key: "judge_score", label: "Correctness (judge)", help: "The judge model scores the answer 1–10 against the reference", scale: 10 },
+  { key: "similarity", label: "Similarity", help: "Semantic similarity (embeddings) between the answer and the reference", scale: 1 },
+  { key: "keyword_score", label: "Keywords", help: "Share of keywords present in the answer", scale: 1 },
+  { key: "answer_relevance", label: "Relevance", help: "Similarity between question and answer: does it answer what was asked?", scale: 1 },
+  { key: "faithfulness", label: "Faithfulness", help: "The judge scores 1–10 whether the claims are backed by the context (low = hallucinates)", scale: 10, rag: true },
+  { key: "context_relevance", label: "Context relevance", help: "Mean score of the retrieved chunks: did the retriever bring back something relevant?", scale: 1, rag: true },
+  { key: "context_recall", label: "Context recall", help: "Does any retrieved chunk contain the reference answer?", scale: 1, rag: true },
+  { key: "rating", label: "Your rating", help: "Your average rating (1–5 stars)", scale: 5 },
 ];
 const COLORS = ["#7c8cff", "#3fb950", "#d29922", "#f85149", "#a371f7", "#39c5cf"];
 const fmt = (v: number | null | undefined, m: Metric) => (v == null ? "—" : m.scale === 1 ? (m.key === "keyword_score" ? `${Math.round(v * 100)}%` : v.toFixed(3)) : v.toFixed(1));
-/** Color de celda: rojo (0) → ámbar → verde (1). */
+/** Cell colour: red (0) → amber → green (1). */
 const heat = (x: number) => `color-mix(in srgb, ${x >= 0.5 ? "var(--ok)" : "var(--err)"} ${Math.round(Math.abs(x - 0.5) * 2 * 45 + 8)}%, transparent)`;
 
 function Matrix({ summary, metric }: { summary: Record<string, any>; metric: Metric }) {
@@ -245,7 +245,7 @@ function Matrix({ summary, metric }: { summary: Record<string, any>; metric: Met
   const best = vals.length ? Math.max(...vals) : null;
   return (
     <table className="matrix">
-      <thead><tr><th>Modelo</th><th style={{ textAlign: "center" }}>Sin RAG</th><th style={{ textAlign: "center" }}>Con RAG</th><th style={{ textAlign: "center" }}>Efecto del RAG</th></tr></thead>
+      <thead><tr><th>Model</th><th style={{ textAlign: "center" }}>No RAG</th><th style={{ textAlign: "center" }}>With RAG</th><th style={{ textAlign: "center" }}>RAG effect</th></tr></thead>
       <tbody>
         {models.map((m) => {
           const a = cell(m, false)?.[metric.key], b = cell(m, true)?.[metric.key];
@@ -274,7 +274,7 @@ function RunDetail({ id, onDelete }: { id: number; onDelete: () => void }) {
   const { confirm } = useDialog();
   const [view, setView] = useState<"side" | "list">("side");
   const [metricKey, setMetricKey] = useState<string | null>(null);
-  if (!run) return <div className="empty">Cargando…</div>;
+  if (!run) return <div className="empty">Loading…</div>;
   const summary = run.summary ?? {};
   const variants = Object.keys(summary);
   const present = METRICS.filter((m) => variants.some((v) => summary[v][m.key] != null));
@@ -291,8 +291,8 @@ function RunDetail({ id, onDelete }: { id: number; onDelete: () => void }) {
       <div className="card">
         <div className="row between">
           <div><h2 style={{ marginBottom: 2 }}>{run.name} <StatusBadge status={run.status} /></h2>
-            <div className="sub">{run.config.questions.length} preguntas · {run.config.model_ids.length} modelo(s){run.config.rag_collection_id ? ` · RAG: ${(run.config.rag_modes ?? ["on"]).map((m: string) => (m === "on" ? "con" : "sin")).join(" y ")}` : ""}{run.config.judge_model_id ? " · con juez" : ""}</div></div>
-          <button className="danger" onClick={async () => (await confirm("¿Borrar esta evaluación?", "Se perderán las respuestas y tus valoraciones.", { label: "Borrar" })) && api.del(`/api/evals/${id}`).then(onDelete)}><Trash2 size={14} /></button>
+            <div className="sub">{run.config.questions.length} questions · {run.config.model_ids.length} model(s){run.config.rag_collection_id ? ` · RAG: ${(run.config.rag_modes ?? ["on"]).map((m: string) => (m === "on" ? "with" : "without")).join(" and ")}` : ""}{run.config.judge_model_id ? " · with a judge" : ""}</div></div>
+          <button className="danger" onClick={async () => (await confirm("Delete this evaluation?", "The answers and your ratings will be lost.", { label: "Delete" })) && api.del(`/api/evals/${id}`).then(onDelete)}><Trash2 size={14} /></button>
         </div>
         {run.error && <div className="error-box" style={{ marginTop: 10 }}>{run.error}</div>}
       </div>
@@ -300,7 +300,7 @@ function RunDetail({ id, onDelete }: { id: number; onDelete: () => void }) {
       {isMatrix && metric && (
         <div className="card">
           <div className="row between" style={{ marginBottom: 10 }}>
-            <div><h3 style={{ margin: 0 }}>Matriz fine-tuning × RAG</h3><div className="sub">{metric.help}</div></div>
+            <div><h3 style={{ margin: 0 }}>Fine-tuning × RAG matrix</h3><div className="sub">{metric.help}</div></div>
             <select value={metric.key} onChange={(e) => setMetricKey(e.target.value)} style={{ width: "auto" }}>
               {present.filter((m) => !m.rag).map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
             </select>
@@ -311,10 +311,10 @@ function RunDetail({ id, onDelete }: { id: number; onDelete: () => void }) {
 
       {variants.length > 0 && (
         <div className="card">
-          <h3>Métricas por variante</h3>
+          <h3>Metrics per variant</h3>
           <div style={{ overflowX: "auto" }}>
             <table>
-              <thead><tr><th>Variante</th>{present.map((m) => <th key={m.key} title={m.help} style={{ cursor: "help" }}>{m.label}{m.rag ? " ⓡ" : ""}</th>)}<th>Latencia</th></tr></thead>
+              <thead><tr><th>Variant</th>{present.map((m) => <th key={m.key} title={m.help} style={{ cursor: "help" }}>{m.label}{m.rag ? " ⓡ" : ""}</th>)}<th>Latency</th></tr></thead>
               <tbody>{variants.map((v) => (
                 <tr key={v}><td><b>{summary[v].model_name}</b>{summary[v].rag && <span className="badge accent" style={{ marginLeft: 6 }}>RAG</span>}</td>
                   {present.map((m) => <td key={m.key}>{fmt(summary[v][m.key], m)}</td>)}<td>{summary[v].latency_s}s</td></tr>
@@ -323,15 +323,15 @@ function RunDetail({ id, onDelete }: { id: number; onDelete: () => void }) {
           </div>
           {run.judge_agreement && run.config.judge_model_id && (
             <div className="source" style={{ marginTop: 10, padding: "8px 12px" }}>
-              <b>¿Coincide el juez contigo?</b>{" "}
+              <b>Does the judge agree with you?</b>{" "}
               {run.judge_agreement.spearman == null
-                ? <span className="sub">Valora con estrellas al menos 3 respuestas para calibrar el juez ({run.judge_agreement.n}/3).</span>
-                : <span>correlación <b>{run.judge_agreement.spearman}</b> · error medio <b>{run.judge_agreement.mae}</b> estrellas
-                  {run.judge_agreement.judge_bias ? ` · el juez puntúa ${run.judge_agreement.judge_bias > 0 ? "más alto" : "más bajo"} que tú (${run.judge_agreement.judge_bias > 0 ? "+" : ""}${run.judge_agreement.judge_bias})` : ""}
-                  <span className="sub"> · {run.judge_agreement.spearman >= 0.7 ? "fiable" : run.judge_agreement.spearman >= 0.4 ? "orientativo" : "poco fiable: usa un juez más grande"} ({run.judge_agreement.n} valoraciones)</span></span>}
+                ? <span className="sub">Rate at least 3 answers with stars to calibrate the judge ({run.judge_agreement.n}/3).</span>
+                : <span>correlation <b>{run.judge_agreement.spearman}</b> · mean error <b>{run.judge_agreement.mae}</b> stars
+                  {run.judge_agreement.judge_bias ? ` · the judge scores ${run.judge_agreement.judge_bias > 0 ? "higher" : "lower"} than you (${run.judge_agreement.judge_bias > 0 ? "+" : ""}${run.judge_agreement.judge_bias})` : ""}
+                  <span className="sub"> · {run.judge_agreement.spearman >= 0.7 ? "reliable" : run.judge_agreement.spearman >= 0.4 ? "indicative" : "unreliable: use a bigger judge"} ({run.judge_agreement.n} ratings)</span></span>}
             </div>
           )}
-          <div className="sub" style={{ marginTop: 6, fontSize: 12 }}>ⓡ métricas específicas de RAG · pasa el ratón por cada columna para ver qué mide · métricas del juez sólo si se eligió modelo juez</div>
+          <div className="sub" style={{ marginTop: 6, fontSize: 12 }}>ⓡ RAG-specific metrics · hover over a column to see what it measures · judge metrics only if a judge model was chosen</div>
           {chart.length > 0 && (
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={chart} margin={{ top: 16 }}>
@@ -350,10 +350,10 @@ function RunDetail({ id, onDelete }: { id: number; onDelete: () => void }) {
       {run.results.length > 0 && (
         <div className="card">
           <div className="row between" style={{ marginBottom: 10 }}>
-            <h3 style={{ margin: 0 }}>Respuestas</h3>
+            <h3 style={{ margin: 0 }}>Answers</h3>
             <div className="tabs" style={{ margin: 0, border: 0 }}>
-              <button className={`tab ${view === "side" ? "active" : ""}`} onClick={() => setView("side")}>Lado a lado</button>
-              <button className={`tab ${view === "list" ? "active" : ""}`} onClick={() => setView("list")}>Lista</button>
+              <button className={`tab ${view === "side" ? "active" : ""}`} onClick={() => setView("side")}>Side by side</button>
+              <button className={`tab ${view === "list" ? "active" : ""}`} onClick={() => setView("list")}>List</button>
             </div>
           </div>
           <div className="stack" style={{ gap: 18 }}>
@@ -362,23 +362,23 @@ function RunDetail({ id, onDelete }: { id: number; onDelete: () => void }) {
               return (
                 <div key={q} style={{ borderBottom: "1px solid var(--border)", paddingBottom: 14 }}>
                   <div><b>{q}</b></div>
-                  {rs[0].expected && <div className="sub" style={{ margin: "4px 0 8px" }}>Referencia: {rs[0].expected}</div>}
+                  {rs[0].expected && <div className="sub" style={{ margin: "4px 0 8px" }}>Reference: {rs[0].expected}</div>}
                   <div className={view === "side" ? "grid" : "stack"} style={{ gridTemplateColumns: view === "side" ? `repeat(${Math.min(rs.length, 4)}, minmax(0,1fr))` : undefined }}>
                     {rs.map((r) => (
                       <div key={r.i} className="source" style={{ padding: 10 }}>
                         <div className="row between" style={{ alignItems: "flex-start" }}>
                           <b>{r.model_name}{r.rag && <span className="badge accent" style={{ marginLeft: 6 }}>RAG</span>}
-                            {r.rag_mode && r.rag_mode !== "rag" && <span className="badge warn" style={{ marginLeft: 4 }} title="Ningún fragmento superó el umbral: respondió sin contexto">sin contexto</span>}</b>
+                            {r.rag_mode && r.rag_mode !== "rag" && <span className="badge warn" style={{ marginLeft: 4 }} title="No chunk passed the threshold: answered without context">no context</span>}</b>
                           <div className="row" style={{ gap: 4, justifyContent: "flex-end" }}>
-                            {r.keyword_score != null && <span className={`badge ${r.keyword_score === 1 ? "ok" : r.keyword_score === 0 ? "err" : "warn"}`} title="Palabras clave">{Math.round(r.keyword_score * 100)}%</span>}
-                            {r.similarity != null && <span className="badge accent" title="Similitud con la referencia">{r.similarity.toFixed(2)}</span>}
-                            {r.judge_score != null && <span className="badge warn" title={r.judge_reason}>juez {r.judge_score}</span>}
-                            {r.faithfulness != null && <span className={`badge ${r.faithfulness >= 7 ? "ok" : r.faithfulness >= 4 ? "warn" : "err"}`} title={r.faithfulness_reason}>fiel {r.faithfulness}</span>}
+                            {r.keyword_score != null && <span className={`badge ${r.keyword_score === 1 ? "ok" : r.keyword_score === 0 ? "err" : "warn"}`} title="Keywords">{Math.round(r.keyword_score * 100)}%</span>}
+                            {r.similarity != null && <span className="badge accent" title="Similarity to the reference">{r.similarity.toFixed(2)}</span>}
+                            {r.judge_score != null && <span className="badge warn" title={r.judge_reason}>judge {r.judge_score}</span>}
+                            {r.faithfulness != null && <span className={`badge ${r.faithfulness >= 7 ? "ok" : r.faithfulness >= 4 ? "warn" : "err"}`} title={r.faithfulness_reason}>faithful {r.faithfulness}</span>}
                           </div></div>
                         <div style={{ whiteSpace: "pre-wrap", margin: "6px 0", fontSize: 13 }}><AssistantText text={r.raw_answer ?? r.answer} /></div>
                         {r.sources?.length > 0 && (
                           <details className="sub" style={{ fontSize: 12 }}>
-                            <summary style={{ cursor: "pointer" }}>{r.sources.length} fragmentos · recall {r.context_recall?.toFixed(2) ?? "—"}</summary>
+                            <summary style={{ cursor: "pointer" }}>{r.sources.length} chunks · recall {r.context_recall?.toFixed(2) ?? "—"}</summary>
                             {r.sources.map((s: any, j: number) => (
                               <div key={j} style={{ marginTop: 6, whiteSpace: "pre-wrap" }}><b>[{j + 1}] {s.source} · {s.score}</b><br />{s.text}</div>
                             ))}

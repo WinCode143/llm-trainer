@@ -23,7 +23,7 @@ async function handle<T>(r: Response): Promise<T> {
     try {
       const j = await r.json();
       msg = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail ?? j);
-    } catch { /* cuerpo no JSON */ }
+    } catch { /* body isn't JSON */ }
     throw new Error(msg);
   }
   return r.json();
@@ -41,7 +41,7 @@ export const api = {
   del: <T,>(url: string) => fetch(url, { method: "DELETE" }).then((r) => handle<T>(r)),
 };
 
-/** POST que devuelve NDJSON; llama onEvent por cada línea. */
+/** POST that returns NDJSON; calls onEvent for each line. */
 export async function streamNDJSON(url: string, body: unknown, onEvent: (e: any) => void, signal?: AbortSignal) {
   const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
   if (!r.ok || !r.body) await handle(r);
@@ -61,13 +61,13 @@ export async function streamNDJSON(url: string, body: unknown, onEvent: (e: any)
   }
 }
 
-/** Espera a que una tarea en segundo plano termine. */
+/** Waits for a background task to finish. */
 export async function waitTask(id: string, onProgress?: (t: Task) => void): Promise<Task> {
   for (;;) {
     const t = await api.get<Task>(`/api/tasks/${id}`);
     onProgress?.(t);
     if (t.status !== "running") {
-      if (t.status === "failed") throw new Error(t.error?.split("\n")[0] ?? "La tarea falló");
+      if (t.status === "failed") throw new Error(t.error?.split("\n")[0] ?? "The task failed");
       return t;
     }
     await new Promise((r) => setTimeout(r, 1000));

@@ -19,28 +19,28 @@ export function ParamsEditor({ p, set }: { p: GenParams; set: (p: GenParams) => 
   );
   return (
     <div className="stack">
-      <Field label="Razonamiento (<think>)" hint="Para modelos razonadores como Qwen3; el resto lo ignora">
+      <Field label="Reasoning (<think>)" hint="For reasoning models such as Qwen3; others ignore it">
         <select value={String(p.enable_thinking)} onChange={(e) => set({ ...p, enable_thinking: e.target.value === "null" ? null : e.target.value === "true" })}>
-          <option value="null">Por defecto del modelo</option><option value="true">Activado</option><option value="false">Desactivado</option>
+          <option value="null">Model default</option><option value="true">On</option><option value="false">Off</option>
         </select>
       </Field>
-      {row("temperature", "Temperatura", 0, 2, 0.05)}
+      {row("temperature", "Temperature", 0, 2, 0.05)}
       <Adv>
         {row("top_p", "Top-p", 0, 1, 0.01)}
         {row("top_k", "Top-k", 0, 200, 1)}
-        {row("repetition_penalty", "Penalización repetición", 1, 2, 0.01)}
+        {row("repetition_penalty", "Repetition penalty", 1, 2, 0.01)}
       </Adv>
-      {row("max_new_tokens", "Máx. tokens nuevos", 16, 4096, 16)}
+      {row("max_new_tokens", "Max new tokens", 16, 4096, 16)}
     </div>
   );
 }
 
-/** Estado persistente por navegador (conversación y ajustes del playground). */
+/** Per-browser persistent state (the playground's conversation and settings). */
 function usePersisted<T>(key: string, initial: T): [T, (v: T | ((p: T) => T)) => void] {
   const [v, setV] = useState<T>(() => {
     try { const raw = localStorage.getItem(key); return raw ? { ...initial as object, ...JSON.parse(raw) } as T : initial; } catch { return initial; }
   });
-  useEffect(() => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* sin almacenamiento */ } }, [key, v]);
+  useEffect(() => { try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* no storage */ } }, [key, v]);
   return [v, setV];
 }
 
@@ -49,19 +49,19 @@ export default function Playground() {
   return (
     <>
       <div className="page-head">
-        <div><h1>Playground</h1><div className="sub">Chatea con tus modelos, con o sin RAG, y compáralos</div></div>
+        <div><h1>Playground</h1><div className="sub">Chat with your models, with or without RAG, and compare them</div></div>
         <div className="tabs" style={{ margin: 0, border: 0 }}>
           <button className={`tab ${tab === "chat" ? "active" : ""}`} onClick={() => setTab("chat")}>Chat</button>
-          <button className={`tab ${tab === "compare" ? "active" : ""}`} onClick={() => setTab("compare")}>Comparar A/B</button>
+          <button className={`tab ${tab === "compare" ? "active" : ""}`} onClick={() => setTab("compare")}>A/B compare</button>
         </div>
       </div>
-      <Help title="¿Para qué sirve el Playground?">
-        <p>Es donde <b>pruebas</b> lo que entrenas. Carga un modelo (base o tu adaptador) y habla con él.</p>
+      <Help title="What is the Playground for?">
+        <p>It's where you <b>try out</b> what you train. Load a model (a base model or your adapter) and talk to it.</p>
         <ul>
-          <li><b>RAG</b>: elige una colección y el modelo responderá usando tus documentos, citando las fuentes. Si nada es relevante, te avisa y responde sin contexto.</li>
-          <li><b>Imágenes</b>: si cargas un modelo de visión, puedes adjuntar imágenes.</li>
-          <li><b>Comparar A/B</b>: el mismo prompt en varios modelos, uno tras otro (sólo cabe uno en VRAM), para ver si el fine-tuning mejoró.</li>
-          <li>Las conversaciones se guardan solas y puedes copiar o regenerar la última respuesta.</li>
+          <li><b>RAG</b>: pick a collection and the model answers from your documents, citing the sources. If nothing is relevant, it tells you and answers without context.</li>
+          <li><b>Images</b>: if you load a vision model, you can attach images.</li>
+          <li><b>A/B compare</b>: the same prompt on several models, one after another (only one fits in VRAM), to see whether fine-tuning helped.</li>
+          <li>Conversations are saved automatically, and you can copy or regenerate the last reply.</li>
         </ul>
       </Help>
       {tab === "chat" ? <Chat /> : <Compare />}
@@ -81,7 +81,7 @@ function Chat() {
   const setConvId = (id: number | null) => setSaved((p) => ({ ...p, convId: id }));
   const [input, setInput] = useState("");
   const [images, setImages] = useState<string[]>([]);
-  const { system, params, rag, ragK } = saved; // ragK 0 = usar top_k de la colección
+  const { system, params, rag, ragK } = saved; // ragK 0 = use the collection's top_k
   const setSystem = (v: string) => setSaved((p) => ({ ...p, system: v }));
   const setParams = (v: GenParams) => setSaved((p) => ({ ...p, params: v }));
   const setRag = (v: number | "") => setSaved((p) => ({ ...p, rag: v }));
@@ -96,12 +96,12 @@ function Chat() {
   const loaded = status?.loaded;
 
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }); }, [msgs]);
-  // Cargar la conversación seleccionada
+  // Load the selected conversation
   useEffect(() => {
     if (!convId) { setMsgs([]); return; }
     api.get<any>(`/api/conversations/${convId}`).then((c) => setMsgs(c.messages)).catch(() => setConvId(null));
   }, [convId]); // eslint-disable-line
-  // Guardar en el servidor al terminar cada respuesta (no en cada token)
+  // Save to the server when each reply finishes (not on every token)
   const persist = async (all: ChatMsg[]) => {
     const settings = { model: status?.loaded?.name, rag, system, params };
     if (convId) await api.put(`/api/conversations/${convId}`, { messages: all, settings });
@@ -125,7 +125,7 @@ function Chat() {
     if (!override) { setInput(""); setImages([]); }
     setBusy(true);
     abort.current = new AbortController();
-    // La respuesta se acumula localmente: así al terminar se guarda exactamente lo mostrado
+    // The reply accumulates locally: that way exactly what was shown gets saved
     let answer: ChatMsg = { role: "assistant", content: "" };
     const upd = (f: (m: ChatMsg) => ChatMsg) => { answer = f(answer); setMsgs([...history, answer]); };
     try {
@@ -150,46 +150,46 @@ function Chat() {
     <div className="split" style={{ gridTemplateColumns: "300px minmax(0,1fr)" }}>
       <div className="card stack">
         <div className="row between">
-          <b>Conversaciones</b>
-          <button className="sm" onClick={newConv}><MessageSquarePlus size={13} /> Nueva</button>
+          <b>Conversations</b>
+          <button className="sm" onClick={newConv}><MessageSquarePlus size={13} /> New</button>
         </div>
-        {(convs?.length ?? 0) > 5 && <input value={convQ} onChange={(e) => setConvQ(e.target.value)} placeholder="Buscar…" />}
+        {(convs?.length ?? 0) > 5 && <input value={convQ} onChange={(e) => setConvQ(e.target.value)} placeholder="Search…" />}
         <div className="conv-list">
-          {!convs?.length && <div className="sub" style={{ fontSize: 12 }}>Se guardan automáticamente</div>}
+          {!convs?.length && <div className="sub" style={{ fontSize: 12 }}>They're saved automatically</div>}
           {convs?.filter((c) => !convQ || c.title.toLowerCase().includes(convQ.toLowerCase())).slice(0, 30).map((c) => (
             <div key={c.id} className={`conv ${c.id === convId ? "active" : ""}`} onClick={() => setConvId(c.id)}>
               <span className="truncate">{c.title}</span>
-              <button className="ghost sm" onClick={(e) => { e.stopPropagation(); delConv(c.id); }} title="Borrar"><Trash2 size={12} /></button>
+              <button className="ghost sm" onClick={(e) => { e.stopPropagation(); delConv(c.id); }} title="Delete"><Trash2 size={12} /></button>
             </div>
           ))}
         </div>
-        <Field label="Modelo">
+        <Field label="Model">
           <select value={loaded?.model_id ?? ""} onChange={(e) => e.target.value && loadModel(+e.target.value)} disabled={!!status?.loading}>
-            <option value="">{status?.loading ? `Cargando ${status.loading}…` : "— cargar modelo —"}</option>
+            <option value="">{status?.loading ? `Loading ${status.loading}…` : "— load a model —"}</option>
             {models?.filter((m) => m.kind !== "embedding").map((m) => <option key={m.id} value={m.id}>{m.name} [{m.kind}]</option>)}
           </select>
         </Field>
-        {status?.loading && <div className="row sub"><Spinner /> Cargando en VRAM…</div>}
-        <Field label="System prompt"><textarea rows={3} value={system} onChange={(e) => setSystem(e.target.value)} placeholder="Eres un asistente útil…" /></Field>
-        <Field label="RAG" hint="Recupera contexto de una colección antes de responder">
+        {status?.loading && <div className="row sub"><Spinner /> Loading into VRAM…</div>}
+        <Field label="System prompt"><textarea rows={3} value={system} onChange={(e) => setSystem(e.target.value)} placeholder="You are a helpful assistant…" /></Field>
+        <Field label="RAG" hint="Retrieves context from a collection before answering">
           <select value={rag} onChange={(e) => setRag(e.target.value ? +e.target.value : "")}>
             <option value="">Sin RAG</option>
             {cols?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </Field>
         {rag && collTags.length > 0 && (
-          <Field label="Buscar sólo en documentos con etiqueta">
+          <Field label="Only search documents tagged">
             <div className="row" style={{ gap: 4 }}>{collTags.map((t) => <button key={t} className={`sm ${ragTags.includes(t) ? "primary" : ""}`} onClick={() => toggleTag(t)}>{t}</button>)}</div>
           </Field>
         )}
-        {rag && <Field label={`Fragmentos a recuperar: ${ragK || "los de la colección"}`}><input type="range" min={0} max={12} value={ragK} onChange={(e) => setRagK(+e.target.value)} /></Field>}
+        {rag && <Field label={`Chunks to retrieve: ${ragK || "the collection's default"}`}><input type="range" min={0} max={12} value={ragK} onChange={(e) => setRagK(+e.target.value)} /></Field>}
         <ParamsEditor p={params} set={setParams} />
 
       </div>
 
       <div className="card chat">
         <div className="chat-log" ref={logRef}>
-          {!msgs.length && <div className="empty">{loaded ? `Escribe un mensaje para hablar con ${loaded.name}` : "Carga un modelo para empezar"}</div>}
+          {!msgs.length && <div className="empty">{loaded ? `Send a message to talk to ${loaded.name}` : "Load a model to start"}</div>}
           {msgs.map((m, i) => (
             <div key={i} className={`msg ${m.role}`}>
               {msgImages(m.content).length > 0 && (
@@ -201,15 +201,15 @@ function Chat() {
               {m.role === "assistant" && busy && i === msgs.length - 1 && !m.content && <Spinner />}
               {m.error && <div className="error-box" style={{ marginTop: 6 }}>{m.error}</div>}
               {m.ragMode && m.ragMode !== "rag" && (
-                <div className="meta" title="Ningún fragmento superó el umbral de relevancia de la colección">
-                  {m.ragMode === "no_context" ? "⚠ Sin contexto relevante: respondió sin RAG" : "⚠ Sin contexto relevante: se indicó que no está en los documentos"}
+                <div className="meta" title="No chunk passed the collection's relevance threshold">
+                  {m.ragMode === "no_context" ? "⚠ No relevant context: answered without RAG" : "⚠ No relevant context: it said the answer isn't in the documents"}
                 </div>
               )}
               {m.sources && m.sources.length > 0 && (
                 <div className="sources">
                   {m.sources.map((s, j) => (
                     <details key={j} className="source">
-                      <summary>{s.image ? "🖼 " : ""}[{j + 1}] {s.source}{s.page ? ` · pág. ${s.page}` : ""}{s.section ? ` · ${s.section}` : ""} · score {s.score?.toFixed?.(3) ?? s.score}</summary>
+                      <summary>{s.image ? "🖼 " : ""}[{j + 1}] {s.source}{s.page ? ` · p. ${s.page}` : ""}{s.section ? ` · ${s.section}` : ""} · score {s.score?.toFixed?.(3) ?? s.score}</summary>
                       <div style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>{s.text}</div>
                       {s.image && rag && <img src={`/api/rag/collections/${rag}/images/${s.image}`} alt="" style={{ maxHeight: 220, marginTop: 6, borderRadius: 8 }} />}
                     </details>
@@ -220,8 +220,8 @@ function Chat() {
                 <div className="meta row" style={{ gap: 2 }}>
                   {m.stats && <span>{m.stats.elapsed_s}s · 1.er token {m.stats.ttft_s}s · {m.stats.chunks_per_s} frag./s</span>}
                   <span className="spacer" />
-                  <button className="ghost sm" title="Copiar" onClick={() => navigator.clipboard?.writeText(msgText(m.content).replace(/^\s*<think>[\s\S]*?<\/think>\s*/, "")).then(() => notify("Copiado"))}><Copy size={12} /></button>
-                  {i === msgs.length - 1 && <button className="ghost sm" title="Regenerar" onClick={() => send(msgs.slice(0, -1))}><RotateCcw size={12} /></button>}
+                  <button className="ghost sm" title="Copy" onClick={() => navigator.clipboard?.writeText(msgText(m.content).replace(/^\s*<think>[\s\S]*?<\/think>\s*/, "")).then(() => notify("Copied"))}><Copy size={12} /></button>
+                  {i === msgs.length - 1 && <button className="ghost sm" title="Regenerate" onClick={() => send(msgs.slice(0, -1))}><RotateCcw size={12} /></button>}
                 </div>
               )}
             </div>
@@ -238,7 +238,7 @@ function Chat() {
           </div>
         )}
         <div className="chat-input">
-          <label className="btn" title={loaded?.vision ? "Adjuntar imagen" : "El modelo cargado no admite imágenes"} style={{ opacity: loaded?.vision ? 1 : 0.5, alignSelf: "flex-end", cursor: loaded?.vision ? "pointer" : "not-allowed" }}>
+          <label className="btn" title={loaded?.vision ? "Attach an image" : "The loaded model doesn't accept images"} style={{ opacity: loaded?.vision ? 1 : 0.5, alignSelf: "flex-end", cursor: loaded?.vision ? "pointer" : "not-allowed" }}>
             <ImagePlus size={15} />
             <input type="file" accept="image/*" multiple hidden disabled={!loaded?.vision} onChange={(e) => {
               for (const f of Array.from(e.target.files ?? [])) {
@@ -249,7 +249,7 @@ function Chat() {
               e.target.value = "";
             }} />
           </label>
-          <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder="Mensaje… (Enter envía, Shift+Enter salto de línea)"
+          <textarea value={input} onChange={(e) => setInput(e.target.value)} placeholder="Message… (Enter sends, Shift+Enter for a new line)"
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
           {busy ? <button onClick={() => abort.current?.abort()}><Square size={14} /></button>
             : <button className="primary" onClick={() => send()} disabled={!loaded || !input.trim()}><Send size={14} /></button>}
@@ -284,8 +284,8 @@ function Compare() {
   return (
     <div className="split" style={{ gridTemplateColumns: "300px minmax(0,1fr)" }}>
       <div className="card stack">
-        <div className="sub">Los modelos se cargan uno tras otro (sólo cabe uno en VRAM), así que cada comparación tarda lo que tarden las cargas.</div>
-        <Field label="Modelos a comparar">
+        <div className="sub">Models load one after another (only one fits in VRAM), so each comparison takes as long as the loads do.</div>
+        <Field label="Models to compare">
           <div className="stack" style={{ gap: 4 }}>
             {models?.filter((m) => m.kind !== "embedding").map((m) => (
               <label key={m.id} className="check">
@@ -301,13 +301,13 @@ function Compare() {
       <div className="stack" style={{ gap: 16 }}>
         <div className="card stack">
           <Field label="Prompt"><textarea rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} /></Field>
-          <div className="row"><div className="spacer" /><button className="primary" disabled={busy || sel.length < 1 || !prompt} onClick={run}>{busy ? <Spinner /> : <Send size={14} />} Comparar</button></div>
+          <div className="row"><div className="spacer" /><button className="primary" disabled={busy || sel.length < 1 || !prompt} onClick={run}>{busy ? <Spinner /> : <Send size={14} />} Compare</button></div>
         </div>
         <div className="grid g2">
           {Object.entries(results).map(([id, r]) => (
             <div key={id} className="card">
               <div className="row between"><h3>{r.name}</h3>{r.latency_s !== undefined && <span className="sub">{r.latency_s}s</span>}</div>
-              <div style={{ whiteSpace: "pre-wrap" }}>{r.text !== undefined ? <AssistantText text={r.text} /> : r.loading ? <span className="row sub"><Spinner /> generando…</span> : <span className="sub">en espera</span>}</div>
+              <div style={{ whiteSpace: "pre-wrap" }}>{r.text !== undefined ? <AssistantText text={r.text} /> : r.loading ? <span className="row sub"><Spinner /> generating…</span> : <span className="sub">waiting</span>}</div>
             </div>
           ))}
         </div>

@@ -1,4 +1,4 @@
-"""Conjuntos de preguntas de evaluación reutilizables."""
+"""Reusable sets of evaluation questions."""
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
@@ -8,7 +8,7 @@ from ..db import EvalRun, QuestionSet, get_session, now
 router = APIRouter(prefix="/api/question-sets", tags=["question-sets"])
 
 
-class Pregunta(BaseModel):
+class Question(BaseModel):
     question: str
     expected: str | None = None
     keywords: list[str] = Field(default_factory=list)
@@ -17,7 +17,7 @@ class Pregunta(BaseModel):
 class SetBody(BaseModel):
     name: str
     description: str = ""
-    questions: list[Pregunta] = Field(default_factory=list)
+    questions: list[Question] = Field(default_factory=list)
     source: str = "manual"
 
 
@@ -27,7 +27,7 @@ def listing(s: Session = Depends(get_session)):
     for q in s.exec(select(QuestionSet).order_by(QuestionSet.updated_at.desc())).all():
         d = q.model_dump(mode="json")
         d["n"] = len(q.questions)
-        # Sin respuesta esperada no hay similitud ni palabras clave: sólo latencia y juez
+        # Without an expected answer there's no similarity or keywords: only latency and the judge
         d["con_referencia"] = sum(1 for x in q.questions if x.get("expected"))
         out.append(d)
     return out
@@ -36,7 +36,7 @@ def listing(s: Session = Depends(get_session)):
 @router.post("")
 def create(body: SetBody, s: Session = Depends(get_session)):
     if s.exec(select(QuestionSet).where(QuestionSet.name == body.name)).first():
-        raise HTTPException(409, "Ya existe un conjunto con ese nombre")
+        raise HTTPException(409, "There's already a set with that name")
     q = QuestionSet(**body.model_dump())
     s.add(q)
     s.commit()
@@ -81,16 +81,16 @@ class DesdeRun(BaseModel):
 
 @router.post("/from-run/{rid}")
 def from_run(rid: int, body: DesdeRun, s: Session = Depends(get_session)):
-    """Guarda las preguntas de una evaluación ya hecha como conjunto reutilizable."""
+    """Saves the questions of an evaluation that already ran as a reusable set."""
     r = s.get(EvalRun, rid)
     if not r:
         raise HTTPException(404)
-    preguntas = r.config.get("questions") or []
-    if not preguntas:
-        raise HTTPException(400, "Esa evaluación no tiene preguntas guardadas")
+    questions = r.config.get("questions") or []
+    if not questions:
+        raise HTTPException(400, "That evaluation has no saved questions")
     if s.exec(select(QuestionSet).where(QuestionSet.name == body.name)).first():
-        raise HTTPException(409, "Ya existe un conjunto con ese nombre")
-    q = QuestionSet(name=body.name, description=body.description, questions=preguntas, source="generado")
+        raise HTTPException(409, "There's already a set with that name")
+    q = QuestionSet(name=body.name, description=body.description, questions=questions, source="generated")
     s.add(q)
     s.commit()
     s.refresh(q)

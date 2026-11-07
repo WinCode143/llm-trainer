@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 
 def _save(s: Session, name: str, fmt: str, rows: list[dict], source: str) -> Dataset:
     if s.exec(select(Dataset).where(Dataset.name == name)).first():
-        raise HTTPException(409, f"Ya existe un dataset llamado '{name}'")
+        raise HTTPException(409, f"There's already a dataset called '{name}'")
     path = svc.write_jsonl(name, rows)
     d = Dataset(name=name, format=fmt, path=str(path), num_rows=len(rows), source=source)
     s.add(d)
@@ -22,22 +22,22 @@ def _save(s: Session, name: str, fmt: str, rows: list[dict], source: str) -> Dat
     return d
 
 
-@router.get("/plantillas")
-def plantillas():
-    """Plantillas por caso de uso: qué forma tienen los datos y cuántos hacen falta."""
-    from ..services.plantillas import listado
-    return listado()
+@router.get("/templates")
+def templates():
+    """Templates by use case: what shape the data has and how much of it you need."""
+    from ..services.dataset_templates import listing
+    return listing()
 
 
-@router.post("/plantillas/{key}")
-def crear_desde_plantilla(key: str, name: str, s: Session = Depends(get_session)):
-    """Crea un dataset con los ejemplos de la plantilla, listo para editar y ampliar."""
-    from ..services.plantillas import PLANTILLAS
-    t = PLANTILLAS.get(key)
+@router.post("/templates/{key}")
+def create_from_template(key: str, name: str, s: Session = Depends(get_session)):
+    """Creates a dataset with the template's examples, ready to edit and extend."""
+    from ..services.dataset_templates import TEMPLATES
+    t = TEMPLATES.get(key)
     if not t:
-        raise HTTPException(404, "No existe esa plantilla")
+        raise HTTPException(404, "There's no such template")
     fmt, rows = svc.normalize(t["filas"], t["formato"])
-    return _save(s, name, fmt, rows, f"plantilla:{key}")
+    return _save(s, name, fmt, rows, f"template:{key}")
 
 
 @router.get("")
@@ -52,7 +52,7 @@ async def upload(file: UploadFile = File(...), name: str = Form(...), format: st
         fmt, rows = svc.import_file(file.filename, await file.read(), format or None, system_prompt or None)
     except Exception as e:
         raise HTTPException(400, str(e))
-    return _save(s, name, fmt, rows, f"archivo:{file.filename}")
+    return _save(s, name, fmt, rows, f"file:{file.filename}")
 
 
 class HFImport(BaseModel):
@@ -68,13 +68,13 @@ class HFImport(BaseModel):
 @router.post("/import-hf")
 def import_hf(body: HFImport):
     def work(task):
-        task.update(message=f"Descargando {body.repo}")
+        task.update(message=f"Downloading {body.repo}")
         fmt, rows = svc.import_hf(body.repo, body.split, body.subset, body.limit, body.format, body.system_prompt)
         from ..db import engine
         with Session(engine) as s:
             return _save(s, body.name, fmt, rows, f"hf:{body.repo}").model_dump(mode="json")
 
-    return tasks.submit("dataset-import", f"Importar {body.repo}", work).to_dict()
+    return tasks.submit("dataset-import", f"Import {body.repo}", work).to_dict()
 
 
 class ManualRows(BaseModel):
@@ -95,7 +95,7 @@ def manual(body: ManualRows, s: Session = Depends(get_session)):
 def _get(s: Session, did: int) -> Dataset:
     d = s.get(Dataset, did)
     if not d:
-        raise HTTPException(404, "Dataset no encontrado")
+        raise HTTPException(404, "Dataset not found")
     return d
 
 
@@ -159,19 +159,19 @@ class SynthBody(BaseModel):
     num_chunks: int = 20
     num_topics: int = 10
     pairs_per_chunk: int = 3
-    language: str = "español"
+    language: str = "English"
     styles: list[str] = ["hecho", "explicacion"]
     system_prompt: str | None = None
     temperature: float = 0.7
     dedupe_threshold: float = 0.92
     judge_min_score: float = 0
-    helper: int | None = None  # modelo ayudante externo; None = el modelo cargado
+    helper: int | None = None  # external helper model; None = the loaded model
 
 
 @router.post("/synthesize")
 def synthesize(body: SynthBody, s: Session = Depends(get_session)):
     if s.exec(select(Dataset).where(Dataset.name == body.name)).first():
-        raise HTTPException(409, f"Ya existe un dataset llamado '{body.name}'")
-    t = tasks.submit("synth", f"Dataset sintético {body.name}",
+        raise HTTPException(409, f"There's already a dataset called '{body.name}'")
+    t = tasks.submit("synth", f"Synthetic dataset {body.name}",
                      lambda task: synth.generate(task, **body.model_dump()))
     return t.to_dict()

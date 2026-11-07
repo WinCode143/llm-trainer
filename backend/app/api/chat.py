@@ -29,7 +29,7 @@ class ChatBody(BaseModel):
     messages: list[dict]
     params: Params = Field(default_factory=Params)
     rag_collection_id: int | None = None
-    rag_k: int | None = None  # None = valores de la colección
+    rag_k: int | None = None  # None = the collection's values
     rag_min_score: float | None = None
     rag_sources: list[str] | None = None
     rag_tags: list[str] | None = None
@@ -37,7 +37,7 @@ class ChatBody(BaseModel):
 
 
 def text_of(content) -> str:
-    """Texto de un mensaje que puede ser multimodal (lista de partes)."""
+    """Text of a message that may be multimodal (a list of parts)."""
     if isinstance(content, list):
         return " ".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text").strip()
     return content or ""
@@ -67,7 +67,7 @@ def stream(body: ChatBody, s: Session = Depends(get_session)):
             msgs, sources, rag_mode = rag.prepare(coll, question, messages[:-1], body.system_prompt, body.system_prompt,
                                                   k=body.rag_k, min_score=body.rag_min_score,
                                                   sources=body.rag_sources, tags=body.rag_tags)
-            # rag_mode: rag | no_context (nada superó el umbral → responde sin contexto) | refuse
+            # rag_mode: rag | no_context (nothing passed the threshold → answers without context) | refuse
             yield {"type": "sources", "sources": sources, "rag_mode": rag_mode}
         else:
             msgs = ([{"role": "system", "content": body.system_prompt}] if body.system_prompt else []) + messages
@@ -99,9 +99,9 @@ class CompareBody(BaseModel):
 
 @router.post("/compare")
 def compare(body: CompareBody, s: Session = Depends(get_session)):
-    """Carga cada modelo en secuencia y genera la respuesta; emite resultados según terminan."""
+    """Loads each model in turn and generates the answer; emits results as they finish."""
     if is_gpu_busy():
-        raise HTTPException(409, "La GPU está ocupada con un entrenamiento")
+        raise HTTPException(409, "The GPU is busy with a training run")
     models = [s.get(Model, i) for i in body.model_ids]
     params = GenParams(**body.params.model_dump())
 

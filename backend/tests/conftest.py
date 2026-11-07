@@ -1,12 +1,12 @@
-"""Preparación común de las pruebas."""
+"""Shared test setup."""
 import pytest
 
 
 @pytest.fixture(autouse=True, scope="session")
-def _tablas():
-    """Crea las tablas que falten antes de empezar.
+def _tables():
+    """Creates any missing tables before starting.
 
-    Sin esto, una tabla recién añadida al modelo no existe hasta que se arranca la app, y las pruebas
-    que la usan fallan con un OperationalError que no tiene nada que ver con lo que prueban."""
+    Without this, a table just added to the model doesn't exist until the app starts, and the tests
+    that use it fail with an OperationalError that has nothing to do with what they test."""
     from app.db import init_db
     init_db()

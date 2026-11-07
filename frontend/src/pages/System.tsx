@@ -6,13 +6,13 @@ import { Help, useData, useDialog, useToast } from "../components/ui";
 
 type Tool = { key: string; label: string; desc: string; setup?: string; manual?: string };
 const TOOLS: Tool[] = [
-  { key: "unsloth", label: "Unsloth", desc: "Motor de entrenamiento ~2× más rápido y con ~50 % menos VRAM (entorno aislado).", setup: "unsloth" },
-  { key: "vllm", label: "vLLM (GRPO rápido)", desc: "Motor de generación para GRPO: genera las respuestas mucho más rápido que transformers (entorno aislado, ~10 GB).", setup: "vllm" },
-  { key: "llama_cpp", label: "llama.cpp (exportación GGUF)", desc: "Convierte y cuantiza modelos a GGUF para Ollama, LM Studio o llama.cpp.", setup: "llamacpp" },
-  { key: "llama_cpp_python", label: "Inferencia GGUF en GPU", desc: "Carga modelos .gguf en el Playground y la API (Vulkan). Se instala junto con llama.cpp.", setup: "llamacpp" },
-  { key: "sandbox", label: "Aislamiento de código (bubblewrap)", desc: "Ejecuta el código de los agentes sin acceso a tus archivos ni a la red, con límites de memoria y tiempo.", manual: "sudo pacman -S bubblewrap" },
-  { key: "tesseract", label: "Tesseract OCR", desc: "Extrae texto de PDFs escaneados al indexarlos en RAG.", manual: "sudo pacman -S tesseract tesseract-data-spa" },
-  { key: "hf_token", label: "Token de Hugging Face", desc: "Necesario para modelos con licencia (Llama, Gemma) y descargas más rápidas.", manual: "Añade LLMT_HF_TOKEN=hf_… al archivo .env y reinicia" },
+  { key: "unsloth", label: "Unsloth", desc: "Training engine ~2× faster with ~50% less VRAM (separate environment).", setup: "unsloth" },
+  { key: "vllm", label: "vLLM (fast GRPO)", desc: "Generation engine for GRPO: produces the completions much faster than transformers (separate environment, ~10 GB).", setup: "vllm" },
+  { key: "llama_cpp", label: "llama.cpp (GGUF export)", desc: "Converts and quantizes models to GGUF for Ollama, LM Studio or llama.cpp.", setup: "llamacpp" },
+  { key: "llama_cpp_python", label: "GGUF inference on the GPU", desc: "Loads .gguf models in the Playground and the API (Vulkan). Installed together with llama.cpp.", setup: "llamacpp" },
+  { key: "sandbox", label: "Code sandbox (bubblewrap)", desc: "Runs agent code without access to your files or the network, with memory and time limits.", manual: "sudo apt install bubblewrap  (Arch: sudo pacman -S bubblewrap)" },
+  { key: "tesseract", label: "Tesseract OCR", desc: "Extracts text from scanned PDFs when indexing them for RAG.", manual: "sudo apt install tesseract-ocr  (Arch: sudo pacman -S tesseract tesseract-data-eng)" },
+  { key: "hf_token", label: "Hugging Face token", desc: "Needed for gated models (Llama, Gemma) and faster downloads.", manual: "Add LLMT_HF_TOKEN=hf_… to the .env file and restart" },
 ];
 
 export default function System() {
@@ -30,24 +30,24 @@ export default function System() {
   };
 
   const base = `${location.protocol}//${location.hostname}:${location.port || (location.protocol === "https:" ? 443 : 80)}/v1`;
-  const model = sys?.inference?.loaded?.name ?? models?.[0]?.name ?? "mi-modelo";
-  const coll = cols?.[0]?.name ?? "mi-coleccion";
-  const key = sys?.api_key_required ? "TU_API_KEY" : "no-necesaria";
+  const model = sys?.inference?.loaded?.name ?? models?.[0]?.name ?? "my-model";
+  const coll = cols?.[0]?.name ?? "my-collection";
+  const key = sys?.api_key_required ? "YOUR_API_KEY" : "not-needed";
 
   return (
     <>
-      <div className="page-head"><div><h1>Sistema</h1><div className="sub">Herramientas opcionales, API compatible con OpenAI y configuración</div></div></div>
+      <div className="page-head"><div><h1>System</h1><div className="sub">Optional tools, OpenAI-compatible API and configuration</div></div></div>
 
-      <Help title="¿Qué se instala aquí y para qué?">
+      <Help title="What gets installed here, and why?">
         <ul>
-          <li><b>Unsloth</b>: entrena ~2× más rápido y con la mitad de VRAM.</li>
-          <li><b>vLLM</b>: genera mucho más rápido (GRPO y evaluaciones por lotes).</li>
-          <li><b>llama.cpp</b>: exportar a GGUF y usar esos modelos en la app.</li>
+          <li><b>Unsloth</b>: trains ~2× faster with half the VRAM.</li>
+          <li><b>vLLM</b>: generates much faster (GRPO and batch evaluations).</li>
+          <li><b>llama.cpp</b>: export to GGUF and use those models in the app.</li>
         </ul>
-        <p style={{ marginTop: 8 }}>Cada uno se instala en su propio entorno para que no choquen sus versiones. Debajo tienes cómo conectar tus modelos a otras apps (API compatible con OpenAI) y a agentes externos (MCP).</p>
+        <p style={{ marginTop: 8 }}>Each one installs into its own environment so their versions don't clash. Below you'll find how to connect your models to other apps (OpenAI-compatible API) and to external agents (MCP).</p>
       </Help>
       <div className="card">
-        <h2>Herramientas</h2>
+        <h2>Tools</h2>
         <table><tbody>
           {TOOLS.map((t) => {
             const ok = !!sys?.tools?.[t.key];
@@ -56,49 +56,49 @@ export default function System() {
                 <td style={{ width: 28 }}>{ok ? <CheckCircle2 size={18} color="var(--ok)" /> : <XCircle size={18} color="var(--muted)" />}</td>
                 <td><b>{t.label}</b><div className="sub" style={{ fontSize: 12.5 }}>{t.desc}</div></td>
                 <td style={{ textAlign: "right", verticalAlign: "middle" }}>
-                  {ok ? <span className="badge ok">instalado</span>
-                    : t.setup ? <button className="sm primary" disabled={!!installing} onClick={() => install(t.setup!)}><Download size={13} /> {installing === t.setup ? "Instalando…" : "Instalar"}</button>
+                  {ok ? <span className="badge ok">installed</span>
+                    : t.setup ? <button className="sm primary" disabled={!!installing} onClick={() => install(t.setup!)}><Download size={13} /> {installing === t.setup ? "Installing…" : "Install"}</button>
                     : <code style={{ fontSize: 12 }}>{t.manual}</code>}
                 </td>
               </tr>
             );
           })}
         </tbody></table>
-        <div className="sub" style={{ fontSize: 12, marginTop: 8 }}>La instalación compila en tu máquina (llama.cpp tarda ~6 min). Todo queda en <code>tools/</code> y <code>backend/</code>; no necesita sudo.</div>
+        <div className="sub" style={{ fontSize: 12, marginTop: 8 }}>Installing compiles on your machine (llama.cpp takes ~6 min). Everything stays in <code>tools/</code> and <code>backend/</code>; no sudo needed.</div>
       </div>
 
       <div className="card">
-        <div className="row between"><h2 style={{ margin: 0 }}>API compatible con OpenAI</h2>
-          <span className="badge accent">{sys?.api_key_required ? "requiere API key" : "sin autenticación (sólo localhost)"}</span></div>
+        <div className="row between"><h2 style={{ margin: 0 }}>OpenAI-compatible API</h2>
+          <span className="badge accent">{sys?.api_key_required ? "API key required" : "no authentication (localhost only)"}</span></div>
         <p className="sub" style={{ marginTop: 8 }}>
-          Usa tus modelos desde Open WebUI, LibreChat, Continue, LangChain o el SDK de OpenAI. El campo <code>model</code> acepta el nombre de cualquier modelo registrado
-          (se carga automáticamente); cualquier otro nombre usa el modelo cargado. Extensión propia: <code>rag_collection</code> aplica el RAG de una colección.
+          Use your models from Open WebUI, LibreChat, Continue, LangChain or the OpenAI SDK. The <code>model</code> field accepts the name of any registered model
+          (it's loaded automatically); any other name uses the loaded model. Extension: <code>rag_collection</code> applies a collection's RAG.
         </p>
         <div className="grid g2" style={{ marginTop: 10 }}>
-          <Snippet title="Python (SDK openai)" code={`from openai import OpenAI\nclient = OpenAI(base_url="${base}", api_key="${key}")\n\nr = client.chat.completions.create(\n    model="${model}",\n    messages=[{"role": "user", "content": "Hola"}],\n    extra_body={"rag_collection": "${coll}"},  # opcional\n)\nprint(r.choices[0].message.content)`} />
-          <Snippet title="curl" code={`curl ${base}/chat/completions \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer ${key}" \\\n  -d '{"model": "${model}", "stream": true,\n       "messages": [{"role": "user", "content": "Hola"}]}'`} />
+          <Snippet title="Python (openai SDK)" code={`from openai import OpenAI\nclient = OpenAI(base_url="${base}", api_key="${key}")\n\nr = client.chat.completions.create(\n    model="${model}",\n    messages=[{"role": "user", "content": "Hello"}],\n    extra_body={"rag_collection": "${coll}"},  # optional\n)\nprint(r.choices[0].message.content)`} />
+          <Snippet title="curl" code={`curl ${base}/chat/completions \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer ${key}" \\\n  -d '{"model": "${model}", "stream": true,\n       "messages": [{"role": "user", "content": "Hello"}]}'`} />
         </div>
         <div className="kv" style={{ marginTop: 12 }}>
           <span>Base URL</span><code>{base}</code>
           <span>Endpoints</span><span className="mono">GET /models · POST /chat/completions (stream) · POST /embeddings</span>
-          <span>Open WebUI</span><span>Ajustes → Conexiones → OpenAI API → URL <code>{base}</code></span>
-          <span>API key</span><span>{sys?.api_key_required ? "Definida en .env (LLMT_API_KEY)" : <>Opcional: define <code>LLMT_API_KEY</code> en <code>.env</code> si expones la app en tu red (<code>LLMT_HOST=0.0.0.0</code>)</>}</span>
+          <span>Open WebUI</span><span>Settings → Connections → OpenAI API → URL <code>{base}</code></span>
+          <span>API key</span><span>{sys?.api_key_required ? "Set in .env (LLMT_API_KEY)" : <>Optional: set <code>LLMT_API_KEY</code> in <code>.env</code> if you expose the app on your network (<code>LLMT_HOST=0.0.0.0</code>)</>}</span>
         </div>
       </div>
 
       <div className="card">
-        <div className="sub">El servidor MCP, los servidores MCP externos y los modelos ayudantes están ahora en <b>Conexiones</b>.</div>
+        <div className="sub">The MCP server, external MCP servers and helper models now live under <b>Connections</b>.</div>
       </div>
 
       <Backups />
 
       <div className="card">
-        <h2>Configuración</h2>
+        <h2>Configuration</h2>
         <div className="kv">
-          <span>Carpeta de datos</span><code>{sys?.data_dir}</code>
-          <span>Disco libre</span><span>{sys?.disk_free_gb} GB</span>
-          <span>GPU</span><span>{sys?.gpus?.[0] ? `${sys.gpus[0].name} · ${sys.gpus[0].mem_total_gb.toFixed(0)} GB` : "no detectada"}</span>
-          <span>Archivo .env</span><span className="sub">Copia <code>.env.example</code> a <code>.env</code> para token de HF, API key, host y rutas. Requiere reiniciar.</span>
+          <span>Data folder</span><code>{sys?.data_dir}</code>
+          <span>Free disk</span><span>{sys?.disk_free_gb} GB</span>
+          <span>GPU</span><span>{sys?.gpus?.[0] ? `${sys.gpus[0].name} · ${sys.gpus[0].mem_total_gb.toFixed(0)} GB` : "not detected"}</span>
+          <span>.env file</span><span className="sub">Copy <code>.env.example</code> to <code>.env</code> for the HF token, API key, host and paths. Needs a restart.</span>
         </div>
       </div>
     </>
@@ -114,7 +114,7 @@ function Snippet({ title, code }: { title: string; code: string }) {
   );
 }
 
-/** Copias de seguridad de lo irreemplazable (base de datos, datasets y RAG). */
+/** Backups of what can't be replaced (database, datasets and RAG). */
 function Backups() {
   const [data, reload] = useData<any>("/api/system/backups");
   const [busy, setBusy] = useState(false);
@@ -124,16 +124,16 @@ function Backups() {
   const { confirm } = useDialog();
   const run = async () => {
     setBusy(true);
-    try { track(await api.post("/api/system/backups", { note: "copia manual" }), () => { setBusy(false); reload(); }); }
+    try { track(await api.post("/api/system/backups", { note: "manual backup" }), () => { setBusy(false); reload(); }); }
     catch (e: any) { notify(e.message, "err"); setBusy(false); }
   };
   const del = async (name: string) => {
-    if (!(await confirm(`¿Borrar la copia ${name}?`, undefined, { label: "Borrar" }))) return;
+    if (!(await confirm(`Delete backup ${name}?`, undefined, { label: "Delete" }))) return;
     await api.del(`/api/system/backups/${name}`); reload();
   };
   const help = async (name: string) => {
     const r = await api.get<any>(`/api/system/backups/${name}/restore-help`);
-    await confirm("Cómo restaurar esta copia", r.instructions, { label: "Entendido", danger: false });
+    await confirm("How to restore this backup", r.instructions, { label: "Got it", danger: false });
   };
   const verify = async (name: string) => {
     setChecking(name);
@@ -141,7 +141,7 @@ function Backups() {
       const t = await api.post<any>(`/api/system/backups/${name}/verify`);
       track(t, (done) => {
         setChecks((c) => ({ ...c, [name]: done.result }));
-        notify(done.result?.ok ? `${name}: la copia abre correctamente` : `${name}: ${done.result?.error}`,
+        notify(done.result?.ok ? `${name}: the backup opens correctly` : `${name}: ${done.result?.error}`,
                done.result?.ok ? "info" : "err");
       });
     } catch (e: any) { notify(e.message, "err"); } finally { setChecking(null); }
@@ -149,18 +149,18 @@ function Backups() {
   return (
     <div className="card">
       <div className="row between">
-        <h2 style={{ margin: 0 }}><Archive size={16} /> Copias de seguridad</h2>
-        <button className="primary" disabled={busy} onClick={run}>{busy ? "Creando…" : "Crear copia ahora"}</button>
+        <h2 style={{ margin: 0 }}><Archive size={16} /> Backups</h2>
+        <button className="primary" disabled={busy} onClick={run}>{busy ? "Creating…" : "Back up now"}</button>
       </div>
       <p className="sub" style={{ marginTop: 8 }}>
-        Incluye <b>base de datos</b> (datasets, modelos, trabajos, colecciones, agentes, conversaciones y evaluaciones),
-        los <b>archivos de dataset</b> y el <b>RAG completo</b> (índices, grafos y documentos originales).
-        No incluye los pesos de los modelos ni los checkpoints: ocupan mucho y se pueden volver a descargar o entrenar.
-        {data?.daily ? " Se crea una copia automática cada 24 h" : " Las copias automáticas están desactivadas"} y se conservan las {data?.keep ?? 7} últimas en <code>{data?.dir}</code>.
+        Includes the <b>database</b> (datasets, models, jobs, collections, agents, conversations and evaluations),
+        the <b>dataset files</b> and the <b>whole RAG</b> (indexes, graphs and original documents).
+        It doesn't include model weights or checkpoints: they're large and can be downloaded or trained again.
+        {data?.daily ? " A backup is created automatically every 24 h" : " Automatic backups are off"} and the last {data?.keep ?? 7} are kept in <code>{data?.dir}</code>.
       </p>
-      {!data?.backups?.length ? <div className="empty">Todavía no hay copias.</div> : (
+      {!data?.backups?.length ? <div className="empty">No backups yet.</div> : (
         <table>
-          <thead><tr><th>Archivo</th><th>Tamaño</th><th>Fecha</th><th>Nota</th><th></th></tr></thead>
+          <thead><tr><th>File</th><th>Size</th><th>Date</th><th>Note</th><th></th></tr></thead>
           <tbody>
             {data.backups.map((b: any) => (
               <tr key={b.file}>
@@ -168,9 +168,9 @@ function Backups() {
                 <td className="sub">{b.note}</td>
                 <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                   <button className="sm ghost" disabled={checking === b.file} onClick={() => verify(b.file)}>
-                    {checking === b.file ? "Verificando…" : "Verificar"}
+                    {checking === b.file ? "Verifying…" : "Verify"}
                   </button>
-                  <button className="sm ghost" onClick={() => help(b.file)}>Restaurar…</button>
+                  <button className="sm ghost" onClick={() => help(b.file)}>Restore…</button>
                   <button className="sm ghost danger" onClick={() => del(b.file)}><Trash2 size={13} /></button>
                 </td>
               </tr>
@@ -181,9 +181,9 @@ function Backups() {
                 <tr key={`${b.file}-check`}>
                   <td colSpan={5} className="sub" style={{ paddingTop: 0 }}>
                     {c.ok ? (
-                      <>✓ Abre correctamente · {Object.entries(c.rows).map(([t, n]: any) => `${t}: ${n}`).join(" · ")}
-                        {" · "}{c.dataset_files} archivo(s) de dataset
-                        {c.missing_tables?.length ? ` · ⚠ es anterior a: ${c.missing_tables.join(", ")}` : ""}</>
+                      <>✓ Opens correctly · {Object.entries(c.rows).map(([t, n]: any) => `${t}: ${n}`).join(" · ")}
+                        {" · "}{c.dataset_files} dataset file(s)
+                        {c.missing_tables?.length ? ` · ⚠ predates: ${c.missing_tables.join(", ")}` : ""}</>
                     ) : <span style={{ color: "var(--err)" }}>✗ {c.error}</span>}
                   </td>
                 </tr>

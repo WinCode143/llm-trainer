@@ -12,12 +12,12 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
     default_embed_model: str = "intfloat/multilingual-e5-small"
-    # Ruta a un checkout de llama.cpp (para convertir a GGUF). Por defecto tools/llama.cpp si existe.
+    # Path to a llama.cpp checkout (to convert to GGUF). Defaults to tools/llama.cpp if it exists.
     llama_cpp_dir: Path | None = None
     hf_token: str | None = None
-    # Clave opcional para la API compatible con OpenAI (/v1). Vacía = sin autenticación.
+    # Optional key for the OpenAI-compatible API (/v1). Empty = no authentication.
     api_key: str | None = None
-    # Copias de seguridad automáticas de la base de datos, datasets y RAG
+    # Automatic backups of the database, datasets and RAG
     backup_daily: bool = True
     backup_keep: int = 7
 

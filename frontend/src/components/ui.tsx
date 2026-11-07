@@ -21,8 +21,8 @@ export function Check({ label, checked, onChange }: { label: string; checked: bo
 }
 
 const STATUS: Record<string, string> = { completed: "ok", running: "accent", queued: "warn", failed: "err", cancelled: "" };
-const STATUS_ES: Record<string, string> = { completed: "completado", running: "en curso", queued: "en cola", failed: "fallido", cancelled: "cancelado" };
-export const StatusBadge = ({ status }: { status: string }) => <span className={`badge ${STATUS[status] ?? ""}`}>{STATUS_ES[status] ?? status}</span>;
+const STATUS_LABEL: Record<string, string> = { completed: "completed", running: "running", queued: "queued", failed: "failed", cancelled: "cancelled" };
+export const StatusBadge = ({ status }: { status: string }) => <span className={`badge ${STATUS[status] ?? ""}`}>{STATUS_LABEL[status] ?? status}</span>;
 
 export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   useEffect(() => {
@@ -35,7 +35,7 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
       <div className={`modal ${wide ? "wide" : ""}`}>
         <div className="row between" style={{ marginBottom: 14 }}>
           <h2 style={{ margin: 0 }}>{title}</h2>
-          <button className="ghost" onClick={onClose} aria-label="Cerrar"><X size={16} /></button>
+          <button className="ghost" onClick={onClose} aria-label="Close"><X size={16} /></button>
         </div>
         {children}
       </div>
@@ -49,7 +49,7 @@ export function Progress({ value }: { value: number }) {
   return <div className="bar"><div style={{ width: `${Math.round(value * 100)}%` }} /></div>;
 }
 
-/** Hook de datos con recarga y polling opcional. */
+/** Data hook with reload and optional polling. */
 export function useData<T>(url: string | null, poll?: number): [T | undefined, () => void, string | null] {
   const [data, setData] = useState<T>();
   const [err, setErr] = useState<string | null>(null);
@@ -69,7 +69,7 @@ export function useData<T>(url: string | null, poll?: number): [T | undefined, (
   return [data, load, err];
 }
 
-// ---------- Notificaciones y tareas en segundo plano ----------
+// ---------- Notifications and background tasks ----------
 type Toast = { id: number; text: string; kind: "info" | "err"; task?: Task };
 const ToastCtx = createContext<{
   notify: (text: string, kind?: "info" | "err") => void;
@@ -125,7 +125,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// ---------- Diálogos (reemplazan confirm/prompt nativos) ----------
+// ---------- Dialogs (replace the native confirm/prompt) ----------
 type Choice = { key: string; label: string; kind?: "primary" | "danger" };
 type DialogReq =
   | { type: "choose"; title: string; message?: ReactNode; choices: Choice[]; resolve: (k: string | null) => void }
@@ -145,7 +145,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
   const choose = useCallback((title: string, message: ReactNode, choices: Choice[]) =>
     new Promise<string | null>((resolve) => setReq({ type: "choose", title, message, choices, resolve })), []);
   const confirm = useCallback(async (title: string, message?: ReactNode, opts?: { label?: string; danger?: boolean }) =>
-    (await choose(title, message, [{ key: "ok", label: opts?.label ?? "Aceptar", kind: opts?.danger === false ? "primary" : "danger" }])) === "ok", [choose]);
+    (await choose(title, message, [{ key: "ok", label: opts?.label ?? "OK", kind: opts?.danger === false ? "primary" : "danger" }])) === "ok", [choose]);
   const prompt = useCallback((title: string, opts?: { message?: ReactNode; value?: string; placeholder?: string }) =>
     new Promise<string | null>((resolve) => { setValue(opts?.value ?? ""); setReq({ type: "prompt", title, message: opts?.message, value: opts?.value ?? "", placeholder: opts?.placeholder, resolve }); }), []);
   const close = (result: string | null) => { req?.resolve(result as never); setReq(null); };
@@ -162,11 +162,11 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                 onKeyDown={(e) => e.key === "Enter" && value.trim() && close(value.trim())} />
             )}
             <div className="row" style={{ justifyContent: "flex-end" }}>
-              <button onClick={() => close(null)}>Cancelar</button>
+              <button onClick={() => close(null)}>Cancel</button>
               {req.type === "choose"
                 ? req.choices.map((c, i) => (
                   <button key={c.key} autoFocus={i === req.choices.length - 1} className={c.kind ?? ""} onClick={() => close(c.key)}>{c.label}</button>))
-                : <button className="primary" disabled={!value.trim()} onClick={() => close(value.trim())}>Aceptar</button>}
+                : <button className="primary" disabled={!value.trim()} onClick={() => close(value.trim())}>OK</button>}
             </div>
           </div>
         </Modal>
@@ -175,13 +175,13 @@ export function DialogProvider({ children }: { children: ReactNode }) {
   );
 }
 
-// ---------- Ayuda breve por pantalla ----------
+// ---------- Short per-screen help ----------
 export function Help({ title, children, defaultOpen = false }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
   const key = `llmt.help.${title}`;
   const [open, setOpen] = useState(() => {
     try { const v = localStorage.getItem(key); return v === null ? defaultOpen : v === "1"; } catch { return defaultOpen; }
   });
-  const toggle = () => { setOpen(!open); try { localStorage.setItem(key, open ? "0" : "1"); } catch { /* sin almacenamiento */ } };
+  const toggle = () => { setOpen(!open); try { localStorage.setItem(key, open ? "0" : "1"); } catch { /* no storage */ } };
   return (
     <div className="help">
       <button className="ghost sm" onClick={toggle}><HelpCircle size={14} /> {title}</button>
@@ -190,13 +190,13 @@ export function Help({ title, children, defaultOpen = false }: { title: string; 
   );
 }
 
-// ---------- Centro de tareas en segundo plano ----------
+// ---------- Background task center ----------
 const KIND_LABEL: Record<string, string> = {
-  "dataset-import": "Importar dataset", synth: "Dataset sintético", download: "Descarga", load: "Cargar modelo",
-  "rag-ingest": "Indexar documentos", "rag-web": "Descargar páginas", "rag-enrich": "Preguntas por fragmento",
-  "rag-summaries": "Resúmenes", "rag-graph": "Grafo de conocimiento", "rag-images": "Describir imágenes",
-  "rag-reindex": "Re-indexar", "rag-bench": "Benchmark de recuperación", eval: "Evaluación",
-  "eval-qgen": "Generar preguntas", setup: "Instalación",
+  "dataset-import": "Import dataset", synth: "Synthetic dataset", download: "Download", load: "Load model",
+  "rag-ingest": "Index documents", "rag-web": "Download pages", "rag-enrich": "Questions per chunk",
+  "rag-summaries": "Summaries", "rag-graph": "Knowledge graph", "rag-images": "Describe images",
+  "rag-reindex": "Re-index", "rag-bench": "Retrieval benchmark", eval: "Evaluation",
+  "eval-qgen": "Generate questions", setup: "Install",
 };
 
 export function TaskCenter() {
@@ -210,7 +210,7 @@ export function TaskCenter() {
     <div className="taskcenter">
       <button className="ghost sm" style={{ width: "100%", justifyContent: "flex-start" }} onClick={() => setOpen(!open)}>
         {running.length ? <Spinner /> : <ListChecks size={14} />}
-        <span className="nav-label">{running.length ? `${running.length} tarea(s)` : "Tareas"}</span>
+        <span className="nav-label">{running.length ? `${running.length} task(s)` : "Tasks"}</span>
       </button>
       {open && (
         <div className="tasklist">
@@ -219,7 +219,7 @@ export function TaskCenter() {
               <div className="row between" style={{ gap: 4 }}>
                 <span className="truncate" title={t.title}>{KIND_LABEL[t.kind] ?? t.kind}</span>
                 {t.status === "running"
-                  ? <button className="ghost sm" title="Cancelar" onClick={() => cancel(t.id)}><X size={11} /></button>
+                  ? <button className="ghost sm" title="Cancel" onClick={() => cancel(t.id)}><X size={11} /></button>
                   : <span className={`badge ${t.status === "completed" ? "ok" : "err"}`}>{t.status === "completed" ? "ok" : "error"}</span>}
               </div>
               {t.status === "running" && <><Progress value={t.progress} /><div className="sub truncate" style={{ fontSize: 11 }}>{t.message}</div></>}
@@ -232,10 +232,10 @@ export function TaskCenter() {
   );
 }
 
-// ---------- Modo simple / completo ----------
-// El modo simple oculta los parámetros que casi nunca hay que tocar y deja sus valores por defecto,
-// que son los mismos que usaría el modo completo si no los cambias. No cambia lo que se envía: sólo
-// lo que se ve. Se guarda por navegador.
+// ---------- Simple / full mode ----------
+// Simple mode hides the settings you almost never need to touch and leaves them at their defaults,
+// which are the same values full mode would use if you didn't change them. It doesn't change what is sent,
+// only what you see. It's remembered per browser.
 const ModeCtx = createContext<{ simple: boolean; setSimple: (v: boolean) => void }>({ simple: true, setSimple: () => {} });
 export const useMode = () => useContext(ModeCtx);
 
@@ -245,52 +245,52 @@ export function ModeProvider({ children }: { children: ReactNode }) {
   });
   const setSimple = useCallback((v: boolean) => {
     setSimpleState(v);
-    try { localStorage.setItem("llmt-mode", v ? "simple" : "full"); } catch { /* modo privado */ }
+    try { localStorage.setItem("llmt-mode", v ? "simple" : "full"); } catch { /* private mode */ }
   }, []);
   return <ModeCtx.Provider value={{ simple, setSimple }}>{children}</ModeCtx.Provider>;
 }
 
-/** Envuelve los ajustes que sólo se ven en modo completo. */
+/** Wraps the settings that only show in full mode. */
 export function Adv({ children }: { children: ReactNode }) {
   const { simple } = useMode();
   return simple ? null : <>{children}</>;
 }
 
-/** Interruptor de la barra lateral. */
+/** Sidebar switch. */
 export function ModeToggle() {
   const { simple, setSimple } = useMode();
-  // Dos botones en vez de uno que alterna: «Modo simple» a secas no dice si es el estado actual
-  // o lo que pasará al pulsarlo, y es justo la duda que no debe tener un interruptor.
+  // Two buttons instead of one toggle: a bare “Simple mode” button doesn't say whether that's the current
+  // state or what clicking will do, and that's exactly the doubt a switch shouldn't leave.
   return (
-    <div className="modos" title="Cuántos ajustes se ven en los formularios">
+    <div className="modes" title="How many settings the forms show">
       <Sliders size={13} />
-      <button className={simple ? "activo" : ""} onClick={() => setSimple(true)}
-        title="Sólo los ajustes que cambian el resultado; el resto usa valores por defecto sensatos">
+      <button className={simple ? "active" : ""} onClick={() => setSimple(true)}
+        title="Only the settings that change the result; everything else uses sensible defaults">
         <span className="nav-label">Simple</span>
       </button>
-      <button className={simple ? "" : "activo"} onClick={() => setSimple(false)}
-        title="Todos los parámetros a la vista">
-        <span className="nav-label">Completo</span>
+      <button className={simple ? "" : "active"} onClick={() => setSimple(false)}
+        title="Every parameter in view">
+        <span className="nav-label">Full</span>
       </button>
     </div>
   );
 }
 
-/** Nota visible sólo en modo simple: dice qué valores se están usando tras los ajustes ocultos,
- *  para que el modo simple no sea una caja negra. */
+/** A note shown only in simple mode: says which values sit behind the hidden settings,
+  *  so simple mode isn't a black box. */
 export function SimpleNote({ children }: { children: ReactNode }) {
   const { simple, setSimple } = useMode();
   if (!simple) return null;
   return (
     <div className="simple-note">
       <Sliders size={13} />
-      <span>{children} <button className="linky" onClick={() => setSimple(false)}>Ver todos los parámetros</button></span>
+      <span>{children} <button className="linky" onClick={() => setSimple(false)}>Show all parameters</button></span>
     </div>
   );
 }
 
-/** Estado de la VRAM y botón para vaciarla, en la barra lateral.
- *  Con 24 GB y modelos de 17, saber quién ocupa qué y poder soltarlo es parte del trabajo diario. */
+/** VRAM status and a button to free it, in the sidebar.
+  *  With 24 GB and 17 GB models, knowing what takes what and being able to release it is part of daily work. */
 export function VramPanel({ gpu }: { gpu: { mem_used_gb: number; mem_total_gb: number } | undefined }) {
   const [v, reload] = useData<{
     libre_gb: number | null; total_gb: number | null; nuestro_gb: number;
@@ -300,41 +300,41 @@ export function VramPanel({ gpu }: { gpu: { mem_used_gb: number; mem_total_gb: n
   const { notify } = useToast();
   if (!gpu) return null;
 
-  const ocupamos = (v?.nuestro_gb ?? 0) >= 0.3;
-  const vaciar = async () => {
+  const oursLoaded = (v?.nuestro_gb ?? 0) >= 0.3;
+  const freeVram = async () => {
     setBusy(true);
     try {
       const r = await api.post<any>("/api/models/inference/unload?everything=true");
-      notify(r.liberado_gb > 0 ? `${r.liberado_gb} GB liberados · quedan ${r.libre_gb} GB libres`
-                               : "No había nada nuestro en la VRAM");
+      notify(r.liberado_gb > 0 ? `${r.liberado_gb} GB freed · ${r.libre_gb} GB free now`
+                               : "Nothing of ours was in VRAM");
       reload();
     } catch (e: any) { notify(e.message, "err"); } finally { setBusy(false); }
   };
 
-  const detalle = [
-    v?.modelo ? `modelo: ${v.modelo}` : null,
+  const detail = [
+    v?.modelo ? `model: ${v.modelo}` : null,
     v?.rag_modelos?.length ? `RAG: ${v.rag_modelos.join(", ")}` : null,
-    `esta app usa ${v?.nuestro_gb ?? 0} GB del total`,
+    `this app uses ${v?.nuestro_gb ?? 0} GB of the total`,
   ].filter(Boolean).join("\n");
 
   return (
     <>
       <div className="row between">
-        <span title={detalle}>VRAM</span>
+        <span title={detail}>VRAM</span>
         <span>{gpu.mem_used_gb.toFixed(1)} / {gpu.mem_total_gb.toFixed(0)} GB</span>
       </div>
-      <div className="bar" title={detalle}>
+      <div className="bar" title={detail}>
         <div style={{ width: `${(gpu.mem_used_gb / gpu.mem_total_gb) * 100}%` }} />
-        {/* La parte que ocupamos nosotros, para distinguirla de lo que usan otros programas */}
-        {!!v?.total_gb && ocupamos && (
-          <div className="bar-nuestro" style={{ width: `${(v.nuestro_gb / v.total_gb) * 100}%` }} />
+        {/* The part we use, to tell it apart from what other programs use */}
+        {!!v?.total_gb && oursLoaded && (
+          <div className="bar-ours" style={{ width: `${(v.nuestro_gb / v.total_gb) * 100}%` }} />
         )}
       </div>
-      {ocupamos && (
-        <button className="mode-toggle" style={{ marginTop: 6 }} disabled={busy} onClick={vaciar}
-          title={`Saca de la VRAM el modelo y los modelos de búsqueda del RAG.\n${detalle}`}>
+      {oursLoaded && (
+        <button className="mode-toggle" style={{ marginTop: 6 }} disabled={busy} onClick={freeVram}
+          title={`Unloads the model and the RAG search models from VRAM.\n${detail}`}>
           <Eraser size={13} />
-          <span className="nav-label">{busy ? "Vaciando…" : `Vaciar VRAM (${v?.nuestro_gb} GB)`}</span>
+          <span className="nav-label">{busy ? "Freeing…" : `Free VRAM (${v?.nuestro_gb} GB)`}</span>
         </button>
       )}
     </>

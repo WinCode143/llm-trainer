@@ -19,18 +19,18 @@ const Jobs = lazy(() => import("./pages/Jobs"));
 const Connections = lazy(() => import("./pages/Connections"));
 
 const NAV = [
-  { to: "/", label: "Panel", icon: Gauge },
+  { to: "/", label: "Dashboard", icon: Gauge },
   { to: "/datasets", label: "Datasets", icon: Database },
-  { to: "/training", label: "Entrenamiento", icon: GraduationCap },
-  { to: "/models", label: "Modelos", icon: Boxes },
-  { to: "/jobs", label: "Trabajos", icon: ListChecks },
+  { to: "/training", label: "Training", icon: GraduationCap },
+  { to: "/models", label: "Models", icon: Boxes },
+  { to: "/jobs", label: "Jobs", icon: ListChecks },
   { to: "/playground", label: "Playground", icon: MessagesSquare },
   { to: "/rag", label: "RAG", icon: Library },
-  { to: "/agents", label: "Agentes", icon: Bot },
-  { to: "/flows", label: "Flujos", icon: Workflow },
-  { to: "/eval", label: "Evaluación", icon: FlaskConical },
-  { to: "/connections", label: "Conexiones", icon: Plug },
-  { to: "/system", label: "Sistema", icon: Settings },
+  { to: "/agents", label: "Agents", icon: Bot },
+  { to: "/flows", label: "Flows", icon: Workflow },
+  { to: "/eval", label: "Evaluation", icon: FlaskConical },
+  { to: "/connections", label: "Connections", icon: Plug },
+  { to: "/system", label: "System", icon: Settings },
 ];
 
 export default function App() {
@@ -54,14 +54,14 @@ export default function App() {
         <div className="sidebar-foot" style={{ marginTop: 8 }}>
           <VramPanel gpu={gpu} />
           <div className="truncate" title={sys?.inference?.loaded?.name}>
-            Modelo: {sys?.inference?.loading ? `cargando ${sys.inference.loading}…` : sys?.inference?.loaded?.name ?? "ninguno"}
+            Model: {sys?.inference?.loading ? `loading ${sys.inference.loading}…` : sys?.inference?.loaded?.name ?? "none"}
           </div>
-          {sys?.gpu_job_running && <span className="badge accent">Entrenando…</span>}
+          {sys?.gpu_job_running && <span className="badge accent">Training…</span>}
         </div>
       </aside>
       <main className="main">
         <ErrorBoundary where={loc.pathname}>
-          <Suspense fallback={<div className="card empty"><Spinner /> Cargando…</div>}>
+          <Suspense fallback={<div className="card empty"><Spinner /> Loading…</div>}>
             <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/datasets" element={<Datasets />} />
@@ -77,7 +77,7 @@ export default function App() {
               <Route path="/connections" element={<Connections />} />
           <Route path="/flows" element={<Flows />} />
           <Route path="/system" element={<System />} />
-              <Route path="*" element={<div className="empty">Página no encontrada</div>} />
+              <Route path="*" element={<div className="empty">Page not found</div>} />
             </Routes>
           </Suspense>
         </ErrorBoundary>

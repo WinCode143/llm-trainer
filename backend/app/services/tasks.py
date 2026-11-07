@@ -1,4 +1,4 @@
-"""Registro en memoria de tareas en segundo plano dentro del proceso (descargas, evaluaciones, ingesta RAG...)."""
+"""In-memory registry of background tasks inside the process (downloads, evaluations, RAG ingestion...)."""
 import threading
 import traceback
 import uuid
@@ -41,13 +41,13 @@ def submit(kind: str, title: str, fn: Callable[[Task], Any]) -> Task:
 
     def run():
         try:
-            resultado = fn(task)
-            task.result = resultado
+            result = fn(task)
+            task.result = result
             task.progress = 1.0
-            task.status = "completed"   # lo último: antes de esto la tarea sigue «running»
+            task.status = "completed"   # last: until then the task is still “running”
         except Exception as e:  # noqa: BLE001
-            # El error se guarda ANTES de marcar el estado: al revés hay una ventana en la que
-            # quien consulta ve «failed» con error a None y no puede decir qué pasó.
+            # The error is saved BEFORE marking the status: the other way round there's a window in which
+            # whoever checks sees “failed” with error None and can't tell what happened.
             task.error = f"{e}\n{traceback.format_exc(limit=5)}"
             task.status = "failed"
 
@@ -64,7 +64,7 @@ def all_tasks() -> list[Task]:
 
 
 def cancel(task_id: str) -> bool:
-    """Pide a una tarea que pare. Es una bandera: el trabajo tiene que mirarla para enterarse."""
+    """Asks a task to stop. It's a flag: the work has to check it to find out."""
     t = _tasks.get(task_id)
     if not t or t.status != "running":
         return False

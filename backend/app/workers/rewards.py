@@ -1,4 +1,4 @@
-"""Funciones de recompensa para GRPO (firma de TRL: f(prompts, completions, **columnas) -> list[float])."""
+"""Reward functions for GRPO (TRL's signature: f(prompts, completions, **columns) -> list[float])."""
 import re
 import unicodedata
 from collections import Counter
@@ -7,7 +7,7 @@ THINK = re.compile(r"<think>(.*?)</think>\s*(.*)", re.S)
 
 
 def _text(c) -> str:
-    # completions conversacionales: [{"role": "assistant", "content": ...}]
+    # conversational completions: [{"role": "assistant", "content": ...}]
     return c[0]["content"] if isinstance(c, list) else str(c)
 
 
@@ -34,7 +34,7 @@ def _f1(pred: str, ref: str) -> float:
 
 
 def correctness(prompts, completions, answer, **_):
-    """0–2: F1 de palabras con la respuesta de referencia (+1 si la contiene literalmente)."""
+    """0–2: word F1 against the reference answer (+1 if it contains it literally)."""
     out = []
     for c, ref in zip(completions, answer):
         ans = _answer_part(_text(c))
@@ -44,7 +44,7 @@ def correctness(prompts, completions, answer, **_):
 
 
 def reasoning_format(prompts, completions, **_):
-    """1 si razona en <think>…</think> y después da una respuesta no vacía."""
+    """1 if it reasons inside <think>…</think> and then gives a non-empty answer."""
     out = []
     for c in completions:
         m = THINK.search(_text(c))
@@ -54,7 +54,7 @@ def reasoning_format(prompts, completions, **_):
 
 def make_length(target_words: int):
     def length(prompts, completions, **_):
-        """1 hasta `target` palabras; decae linealmente hasta 0 al doble."""
+        """1 up to `target` words; decays linearly to 0 at twice that."""
         out = []
         for c in completions:
             n = len(_answer_part(_text(c)).split())
@@ -68,7 +68,7 @@ def make_regex(pattern: str):
     rx = re.compile(pattern, re.S)
 
     def regex(prompts, completions, **_):
-        """1 si la respuesta cumple la expresión regular del usuario."""
+        """1 if the answer matches the user's regular expression."""
         return [1.0 if rx.search(_text(c)) else 0.0 for c in completions]
     regex.__name__ = "regex"
     return regex
@@ -87,5 +87,5 @@ def build(cfg: dict) -> list:
         elif n == "regex" and cfg.get("reward_regex"):
             fns.append(make_regex(cfg["reward_regex"]))
     if not fns:
-        raise ValueError("GRPO necesita al menos una función de recompensa")
+        raise ValueError("GRPO needs at least one reward function")
     return fns

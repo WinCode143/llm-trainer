@@ -15,7 +15,7 @@ const COLORS: Record<string, string> = {
   foreach: "#e3b341", subflow: "#8b949e", code: "#79c0ff",
 };
 
-/** Nodo del lienzo: cabecera con color por tipo y un resumen de su configuración. */
+/** Canvas node: a header coloured by type and a summary of its settings. */
 function NodeBox({ data, selected }: any) {
   const color = COLORS[data.ntype] ?? "#7c8cff";
   return (
@@ -42,15 +42,15 @@ function summarize(n: FlowNode): string {
   switch (n.type) {
     case "llm": return (c.prompt || "").slice(0, 70) || "sin prompt";
     case "tool": return `${c.tool_id ?? "—"}`;
-    case "rag": return `colección ${c.collection_id ?? "—"} · k=${c.k ?? 4}`;
-    case "agent": return `agente ${c.agent_id ?? "—"}`;
-    case "router": return c.mode === "llm" ? "decide el modelo" : (c.branches ?? []).map((b: any) => b.when).join(" · ").slice(0, 60);
+    case "rag": return `collection ${c.collection_id ?? "—"} · k=${c.k ?? 4}`;
+    case "agent": return `agent ${c.agent_id ?? "—"}`;
+    case "router": return c.mode === "llm" ? "the model decides" : (c.branches ?? []).map((b: any) => b.when).join(" · ").slice(0, 60);
     case "approval": return (c.message || "").slice(0, 60);
     case "output": return (c.template || "").slice(0, 60);
-    case "input": return (c.fields ?? []).map((f: any) => f.key).join(", ") || "entrada";
-    case "foreach": return `cada ${c.items_key ?? "?"} · ${c.mode ?? "llm"}${(c.parallel ?? 1) > 1 ? ` ×${c.parallel}` : ""}`;
-    case "subflow": return `flujo ${c.flow_id ?? "—"}`;
-    case "code": return (c.code || "").split("\n")[0].slice(0, 60) || "sin código";
+    case "input": return (c.fields ?? []).map((f: any) => f.key).join(", ") || "input";
+    case "foreach": return `each ${c.items_key ?? "?"} · ${c.mode ?? "llm"}${(c.parallel ?? 1) > 1 ? ` ×${c.parallel}` : ""}`;
+    case "subflow": return `flow ${c.flow_id ?? "—"}`;
+    case "code": return (c.code || "").split("\n")[0].slice(0, 60) || "no code";
     default: return "";
   }
 }
@@ -58,7 +58,7 @@ function summarize(n: FlowNode): string {
 export function FlowCanvas({ spec, onChange, selected, onSelect, running, done, types, tokens }: {
   spec: Spec; onChange: (s: Spec) => void; selected: string | null; onSelect: (id: string | null) => void;
   running?: string | null; done?: string[]; types: Record<string, any>;
-  tokens?: Record<string, string>;   // texto que va llegando en vivo, por nodo
+  tokens?: Record<string, string>;   // text streaming in live, per node
 }) {
   const toNodes = useCallback((): Node[] => spec.nodes.map((n) => ({
     id: n.id, type: "box", position: { x: n.x ?? 100, y: n.y ?? 100 },
@@ -126,43 +126,43 @@ export function FlowCanvas({ spec, onChange, selected, onSelect, running, done, 
   );
 }
 
-/** Coloca los nodos por capas según a qué distancia están de la entrada.
- *  Evita el amasijo que queda cuando añades nodos sueltos y los conectas después. */
+/** Lays nodes out in layers by their distance from the input.
+  *  Avoids the tangle you get when you add loose nodes and connect them afterwards. */
 export function autoLayout(spec: Spec): Spec {
-  const entrantes = new Map<string, number>();
-  spec.nodes.forEach((n) => entrantes.set(n.id, 0));
-  spec.edges.forEach((e) => entrantes.set(e.to, (entrantes.get(e.to) ?? 0) + 1));
+  const indegree = new Map<string, number>();
+  spec.nodes.forEach((n) => indegree.set(n.id, 0));
+  spec.edges.forEach((e) => indegree.set(e.to, (indegree.get(e.to) ?? 0) + 1));
 
-  const nivel = new Map<string, number>();
-  let cola = spec.nodes.filter((n) => (entrantes.get(n.id) ?? 0) === 0).map((n) => n.id);
-  if (!cola.length && spec.nodes.length) cola = [spec.nodes[0].id];   // todo en ciclo: empezamos por el primero
-  cola.forEach((id) => nivel.set(id, 0));
+  const level = new Map<string, number>();
+  let queue = spec.nodes.filter((n) => (indegree.get(n.id) ?? 0) === 0).map((n) => n.id);
+  if (!queue.length && spec.nodes.length) queue = [spec.nodes[0].id];   // everything is in a cycle: start with the first
+  queue.forEach((id) => level.set(id, 0));
 
-  const pendientes = new Map(entrantes);
-  while (cola.length) {
-    const id = cola.shift()!;
+  const pending = new Map(indegree);
+  while (queue.length) {
+    const id = queue.shift()!;
     for (const e of spec.edges.filter((x) => x.from === id)) {
-      nivel.set(e.to, Math.max(nivel.get(e.to) ?? 0, (nivel.get(id) ?? 0) + 1));
-      pendientes.set(e.to, (pendientes.get(e.to) ?? 1) - 1);
-      if ((pendientes.get(e.to) ?? 0) <= 0) cola.push(e.to);
+      level.set(e.to, Math.max(level.get(e.to) ?? 0, (level.get(id) ?? 0) + 1));
+      pending.set(e.to, (pending.get(e.to) ?? 1) - 1);
+      if ((pending.get(e.to) ?? 0) <= 0) queue.push(e.to);
     }
   }
-  // Los nodos de un ciclo no reciben nivel: se dejan al final
-  const maxNivel = Math.max(0, ...[...nivel.values()]);
-  spec.nodes.forEach((n) => { if (!nivel.has(n.id)) nivel.set(n.id, maxNivel + 1); });
+  // Nodes in a cycle get no level: they go at the end
+  const maxLevel = Math.max(0, ...[...level.values()]);
+  spec.nodes.forEach((n) => { if (!level.has(n.id)) level.set(n.id, maxLevel + 1); });
 
-  const porNivel = new Map<number, string[]>();
+  const byLevel = new Map<number, string[]>();
   spec.nodes.forEach((n) => {
-    const l = nivel.get(n.id) ?? 0;
-    porNivel.set(l, [...(porNivel.get(l) ?? []), n.id]);
+    const l = level.get(n.id) ?? 0;
+    byLevel.set(l, [...(byLevel.get(l) ?? []), n.id]);
   });
   return {
     ...spec,
     nodes: spec.nodes.map((n) => {
-      const l = nivel.get(n.id) ?? 0;
-      const fila = porNivel.get(l)!;
-      const i = fila.indexOf(n.id);
-      return { ...n, x: 60 + l * 260, y: 120 + (i - (fila.length - 1) / 2) * 150 };
+      const l = level.get(n.id) ?? 0;
+      const row = byLevel.get(l)!;
+      const i = row.indexOf(n.id);
+      return { ...n, x: 60 + l * 260, y: 120 + (i - (row.length - 1) / 2) * 150 };
     }),
   };
 }

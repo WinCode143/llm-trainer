@@ -1,10 +1,10 @@
-"""RAG: extracción estructurada, chunking por secciones, búsqueda híbrida (BM25 + vectores), reranking y umbral.
+"""RAG: structured extraction, chunking by section, hybrid search (BM25 + vectors), reranking and a threshold.
 
-Pipeline de consulta:
-  1. candidatos por vectores (Chroma, coseno) y/o BM25 (índice en memoria)
-  2. fusión con Reciprocal Rank Fusion (modo hybrid)
-  3. reranking opcional con cross-encoder (score 0–1)
-  4. umbral min_score → si nada lo supera, fallback (sin contexto o negarse)
+Query pipeline:
+    1. candidates by vectors (Chroma, cosine) and/or BM25 (in-memory index)
+    2. fusion with Reciprocal Rank Fusion (hybrid mode)
+    3. optional reranking with a cross-encoder (score 0–1)
+    4. min_score threshold → if nothing passes, fallback (no context, or refuse)
 """
 import hashlib
 import io
@@ -26,11 +26,11 @@ _models: dict[str, object] = {}
 _model_lock = threading.Lock()
 
 DEFAULT_RAG_SYSTEM = (
-    "Eres un asistente que responde usando EXCLUSIVAMENTE el contexto proporcionado. "
-    "Si la respuesta no está en el contexto, dilo claramente. Cita las fuentes con [n]."
+    "You are an assistant that answers using ONLY the provided context. "
+    "If the answer isn't in the context, say so clearly. Cite the sources with [n]."
 )
-REFUSE_TEXT = ("No se encontró información relevante en los documentos para esta pregunta. "
-               "Responde indicando que no aparece en los documentos disponibles, sin inventar.")
+REFUSE_TEXT = ("No relevant information was found in the documents for this question. "
+               "Answer saying that it doesn't appear in the available documents, without making anything up.")
 RRF_K = 60
 
 
@@ -51,7 +51,7 @@ def _col(collection_id: int):
 
 
 def _qcol(collection_id: int):
-    """Colección auxiliar con un vector por pregunta generada (metadato parent = id del fragmento)."""
+    """Auxiliary collection with one vector per generated question (metadata parent = the chunk's id)."""
     return client().get_or_create_collection(chroma_name(collection_id) + "_q", metadata={"hnsw:space": "cosine"})
 
 
@@ -88,27 +88,27 @@ def reranker_model(name: str):
 
 
 def loaded_model_names() -> list[str]:
-    """Qué embedders y rerankers hay ahora mismo en memoria."""
+    """Which embedders and rerankers are in memory right now."""
     with _model_lock:
         return sorted(k.replace("rr:", "reranker ") for k in _models)
 
 
 def unload_models() -> float:
-    """Libera embedders y rerankers de la VRAM.
+    """Frees embedders and rerankers from VRAM.
 
-    El `clear()` sólo suelta la referencia del diccionario: los módulos de torch tienen ciclos, así
-    que sin pasar el recolector antes de vaciar la caché los tensores siguen vivos y la VRAM no baja.
-    Devuelve los GB liberados para poder comprobarlo."""
+    `clear()` only drops the dictionary's reference: torch modules have cycles, so
+    without running the garbage collector before emptying the cache the tensors stay alive and VRAM doesn't go down.
+    Returns the GB freed so it can be checked."""
     import gc
 
-    def usada():
+    def used():
         try:
             import torch
             return torch.cuda.memory_reserved() / 1e9 if torch.cuda.is_available() else 0.0
         except Exception:  # noqa: BLE001
             return 0.0
 
-    antes = usada()
+    before = used()
     with _model_lock:
         _models.clear()
     gc.collect()
@@ -118,11 +118,11 @@ def unload_models() -> float:
         torch.cuda.ipc_collect()
     except Exception:  # noqa: BLE001
         pass
-    return round(max(0.0, antes - usada()), 2)
+    return round(max(0.0, before - used()), 2)
 
 
 def warmup() -> None:
-    """Precarga el embedder por defecto y los rerankers/embedders que usan las colecciones."""
+    """Preloads the default embedder and the rerankers/embedders the collections use."""
     from sqlmodel import Session, select
 
     from ..db import RagCollection, engine
@@ -131,14 +131,14 @@ def warmup() -> None:
         cols = s.exec(select(RagCollection)).all()
     names = {settings.default_embed_model} | {c.embed_model for c in cols}
     for n in names:
-        embed(n, ["calentamiento"], "query")
+        embed(n, ["warm-up"], "query")
     for r in {c.reranker for c in cols if c.reranker}:
         reranker_model(r).predict([("a", "b")], show_progress_bar=False)
-    print(f"[rag] modelos precargados en {time.time() - t0:.1f}s: {sorted(names)} + rerankers")
+    print(f"[rag] models preloaded in {time.time() - t0:.1f}s: {sorted(names)} + rerankers")
 
 
 def _prefix(name: str, kind: str) -> str:
-    # Los modelos E5 esperan prefijos "query: " / "passage: "
+    # E5 models expect "query: " / "passage: " prefixes
     if "e5" in name.lower():
         return "query: " if kind == "query" else "passage: "
     return ""
@@ -151,14 +151,14 @@ def embed(name: str, texts: list[str], kind: str = "passage") -> list[list[float
     return vecs.tolist()
 
 
-# Lo que vivía aquí y ahora está en módulos propios. Se reexporta para no romper a quien ya
-# importaba `rag.chunk_text`, `rag.extract` o `rag.fetch_url`: la partición es interna.
+# What used to live here now has its own modules. It's re-exported so code that already imported
+# `rag.chunk_text`, `rag.extract` or `rag.fetch_url` keeps working: the split is internal.
 from .rag_chunking import (  # noqa: E402,F401
     BM25, bm25_index, chunk_text, contextual, invalidate, make_chunks, normalize_tokens, split_sections,
 )
 from .rag_extract import _html, extract, fetch_url, sitemap_urls, url_ext  # noqa: E402,F401
 
-# ---------------- ingesta y gestión ----------------
+# ---------------- ingestion and management ----------------
 def files_dir(collection_id: int) -> Path:
     d = settings.rag_dir / "files" / str(collection_id)
     d.mkdir(parents=True, exist_ok=True)
@@ -166,7 +166,7 @@ def files_dir(collection_id: int) -> Path:
 
 
 def stored_path(collection_id: int, filename: str, ext: str | None = None) -> Path:
-    """Ruta donde se guarda el original (nombre estable a partir del nombre del documento)."""
+    """Path where the original is stored (a stable name derived from the document's name)."""
     e = ext or Path(filename.split("?")[0]).suffix.lower() or ".bin"
     return files_dir(collection_id) / (hashlib.sha1(filename.encode()).hexdigest()[:16] + e)
 
@@ -174,19 +174,19 @@ def stored_path(collection_id: int, filename: str, ext: str | None = None) -> Pa
 def ingest(collection_id: int, embed_model: str, filename: str, raw: bytes, size: int, overlap: int,
            progress=None, template: str = "general", ext: str | None = None, parser: str = "auto") -> int:
     col = _col(collection_id)
-    # Guardamos el original para poder extraer imágenes después
+    # Keep the original so images can be extracted later
     try:
         stored_path(collection_id, filename, ext).write_bytes(raw)
     except OSError as e:
-        # Sin el original no se puede volver a trocear ni extraer imágenes después. No se aborta la
-        # ingesta por esto, pero tiene que verse: antes era un print entre miles de líneas de log.
-        print(f"[rag] AVISO: no se pudo guardar el original de {filename}: {e}. "
-              "Ese documento no se podrá re-trocear ni re-parsear.")
+        # Without the original it can't be re-chunked or have its images extracted later. Ingestion isn't
+        # aborted for this, but it has to be visible: it used to be a print among thousands of log lines.
+        print(f"[rag] WARNING: couldn't save the original of {filename}: {e}. "
+              "That document can't be re-chunked or re-parsed.")
     doc_hash = hashlib.sha1(filename.encode() + raw).hexdigest()[:10]
     chunks = make_chunks(filename, extract(filename, raw, ext, parser), size, overlap, template)
     if not chunks:
-        raise ValueError(f"No se pudo extraer texto de {filename} (¿PDF escaneado sin capa de texto?)")
-    col.delete(where={"source": filename})  # reemplaza versiones anteriores del documento
+        raise ValueError(f"Couldn't extract text from {filename} (a scanned PDF with no text layer?)")
+    col.delete(where={"source": filename})  # replaces earlier versions of the document
     _qcol(collection_id).delete(where={"source": filename})
     bs = 64
     for start in range(0, len(chunks), bs):
@@ -204,8 +204,8 @@ def ingest(collection_id: int, embed_model: str, filename: str, raw: bytes, size
 
 
 def reindex(coll, new_model: str, task) -> dict:
-    """Recalcula los embeddings con otro modelo. Primero se calculan todos (fase cancelable sin efectos) y
-    sólo al final se escriben: así cancelar nunca deja la colección a medias entre dos modelos."""
+    """Recomputes the embeddings with another model. All of them are computed first (a cancellable phase with no side effects)
+    and only written at the end: that way cancelling never leaves the collection halfway between two models."""
     col = _col(coll.id)
     got = col.get(include=["documents", "metadatas"])
     ids, docs, metas = got["ids"], got["documents"], got["metadatas"]
@@ -214,9 +214,9 @@ def reindex(coll, new_model: str, task) -> dict:
     for i in range(0, len(ids), bs):
         if task.cancel_requested:
             return {"cancelled": True, "chunks": 0}
-        task.update(0.9 * i / max(1, len(ids)), f"Calculando vectores {i}/{len(ids)}")
+        task.update(0.9 * i / max(1, len(ids)), f"Computing vectors {i}/{len(ids)}")
         vectors += embed(new_model, [contextual(d, m) for d, m in zip(docs[i:i + bs], metas[i:i + bs])])
-    task.update(0.92, "Guardando…")
+    task.update(0.92, "Saving…")
     for i in range(0, len(ids), bs):
         col.update(ids=ids[i:i + bs], embeddings=vectors[i:i + bs])
     try:
@@ -225,7 +225,7 @@ def reindex(coll, new_model: str, task) -> dict:
         pass
     for n, (cid, m) in enumerate(zip(ids, metas)):
         if m.get("questions"):
-            task.update(0.92 + 0.08 * n / max(1, len(ids)), "Re-indexando preguntas generadas…")
+            task.update(0.92 + 0.08 * n / max(1, len(ids)), "Re-indexing generated questions…")
             _index_questions(coll.id, new_model, cid, m)
     invalidate(coll.id)
     return {"cancelled": False, "chunks": len(ids)}
@@ -263,7 +263,7 @@ def delete_chunk(collection_id: int, chunk_id: str) -> None:
 
 
 def features(collection_id: int) -> dict:
-    """Qué extras tiene la colección (para mostrarlo en la interfaz)."""
+    """Which extras the collection has (to show in the interface)."""
     try:
         col = _col(collection_id)
         got = col.get(include=["metadatas"])
@@ -271,58 +271,58 @@ def features(collection_id: int) -> dict:
         return {"questions": sum(1 for m in metas if m.get("questions")), "summaries": sum(1 for m in metas if m.get("level")),
                 "images": sum(1 for m in metas if m.get("kind") == "image"), "chunks": len(metas)}
     except Exception as e:  # noqa: BLE001
-        print(f"[rag] no se pudieron leer los extras de la colección {collection_id}: {e}")
+        print(f"[rag] couldn't read the extras of collection {collection_id}: {e}")
         return {"questions": 0, "summaries": 0, "images": 0, "chunks": 0}
 
 
-def reconstruir_texto(collection_id: int, filename: str) -> dict:
-    """Rehace un .md aproximado juntando los fragmentos indexados de un documento.
+def rebuild_text(collection_id: int, filename: str) -> dict:
+    """Rebuilds an approximate .md by joining a document's indexed chunks.
 
-    No es el original: es el texto YA PARSEADO y troceado, vuelto a pegar. Sirve para volver a
-    trocearlo con otra plantilla, que es el motivo habitual para querer el original, pero no para
-    cambiar de parser ni extraer imágenes, porque eso necesita el archivo de verdad.
-    El solape entre fragmentos se recorta comparando el final de uno con el principio del siguiente.
+    It isn't the original: it's the ALREADY PARSED and chunked text, glued back together. It's useful to
+    re-chunk it with another template, which is the usual reason to want the original, but not to
+    switch parsers or extract images, because that needs the real file.
+    The overlap between chunks is trimmed by comparing the end of one with the start of the next.
     """
     col = _col(collection_id)
     got = col.get(where={"source": filename}, include=["documents", "metadatas"])
-    trozos = [(m.get("chunk", i), d) for i, (d, m) in enumerate(zip(got["documents"], got["metadatas"]))
+    pieces = [(m.get("chunk", i), d) for i, (d, m) in enumerate(zip(got["documents"], got["metadatas"]))
               if not m.get("level") and m.get("kind") != "image"]
-    if not trozos:
-        raise RuntimeError(f"No hay fragmentos indexados de {filename}")
-    trozos.sort(key=lambda t: t[0])
+    if not pieces:
+        raise RuntimeError(f"There are no indexed chunks of {filename}")
+    pieces.sort(key=lambda t: t[0])
 
-    partes: list[str] = []
-    for _, texto in trozos:
-        if partes:
-            previo = partes[-1]
-            # Busca el solape más largo entre el final del anterior y el principio de éste
-            maximo = min(len(previo), len(texto), 1000)
-            corte = next((n for n in range(maximo, 30, -1) if previo.endswith(texto[:n])), 0)
-            texto = texto[corte:]
-        partes.append(texto)
-    contenido = "\n\n".join(p.strip() for p in partes if p.strip())
+    parts: list[str] = []
+    for _, piece in pieces:
+        if parts:
+            prev = parts[-1]
+            # Find the longest overlap between the end of the previous one and the start of this one
+            max_len = min(len(prev), len(piece), 1000)
+            cut = next((n for n in range(max_len, 30, -1) if prev.endswith(piece[:n])), 0)
+            piece = piece[cut:]
+        parts.append(piece)
+    content = "\n\n".join(p.strip() for p in parts if p.strip())
 
-    destino = stored_path(collection_id, filename, ".md")
-    destino.write_text(f"<!-- Reconstruido desde los fragmentos indexados, no es el archivo original -->\n\n"
-                       + contenido, encoding="utf-8")
-    return {"archivo": destino.name, "fragmentos": len(trozos), "caracteres": len(contenido)}
+    destination = stored_path(collection_id, filename, ".md")
+    destination.write_text(f"<!-- Rebuilt from the indexed chunks; this isn't the original file -->\n\n"
+                       + content, encoding="utf-8")
+    return {"archivo": destination.name, "fragmentos": len(pieces), "caracteres": len(content)}
 
 
 def stored_originals(collection_id: int, documents: list[str]) -> dict[str, bool]:
-    """Qué documentos conservan su archivo original.
+    """Which documents keep their original file.
 
-    Sólo con el original se puede volver a trocear con otra plantilla, cambiar de parser o extraer
-    imágenes. Los documentos ingeridos antes de que se guardaran los originales no lo tienen, y sin
-    esto no habría forma de saber cuáles."""
+    Only with the original can you re-chunk with another template, switch parsers or extract
+    images. Documents ingested before originals were kept don't have it, and without
+    this there'd be no way to tell which ones."""
     import hashlib as _h
-    carpeta = files_dir(collection_id)
+    folder = files_dir(collection_id)
     out = {}
     for d in documents or []:
         try:
-            # Se busca por el hash con cualquier extensión: un texto reconstruido se guarda como
-            # .md aunque el documento fuera .html, y comparando la extensión no se encontraba.
-            clave = _h.sha1(d.encode()).hexdigest()[:16]
-            out[d] = any(carpeta.glob(f"{clave}.*"))
+            # Look up by hash with any extension: a rebuilt text is saved as
+            # .md even if the document was .html, and comparing the extension didn't find it.
+            key = _h.sha1(d.encode()).hexdigest()[:16]
+            out[d] = any(folder.glob(f"{key}.*"))
         except OSError:
             out[d] = False
     return out
@@ -346,18 +346,18 @@ def drop(collection_id: int) -> None:
             pass
 
 
-# ---------------- búsqueda ----------------
+# ---------------- search ----------------
 QUERY_MODES = {
-    "simple": "La pregunta tal cual",
-    "multi": "El LLM genera 3 reformulaciones y se fusionan los resultados (mejor recall)",
-    "hyde": "El LLM escribe una respuesta hipotética y se busca por ella (HyDE)",
-    "agentic": "Búsqueda iterativa: el LLM decide si el contexto basta o pide otra búsqueda (hasta 3 rondas)",
-    "graph": "GraphRAG: añade entidades, relaciones y temas del grafo de conocimiento (hay que construirlo antes)",
+    "simple": "The question as is",
+    "multi": "The LLM writes 3 rephrasings and the results are fused (better recall)",
+    "hyde": "The LLM writes a hypothetical answer and searches with it (HyDE)",
+    "agentic": "Iterative search: the LLM decides whether the context is enough or asks for another search (up to 3 rounds)",
+    "graph": "GraphRAG: adds entities, relations and topics from the knowledge graph (it has to be built first)",
 }
 
 
 def allowed_sources(coll, sources: list[str] | None = None, tags: list[str] | None = None) -> set[str] | None:
-    """Documentos permitidos según filtro explícito y/o etiquetas (None = sin filtro)."""
+    """Documents allowed by an explicit filter and/or tags (None = no filter)."""
     allowed = set(sources) if sources else None
     if tags:
         meta = coll.doc_meta or {}
@@ -367,14 +367,14 @@ def allowed_sources(coll, sources: list[str] | None = None, tags: list[str] | No
 
 
 def _llm(prompt: str, max_tokens: int = 256, helper: int | None = None) -> str | None:
-    """Llamada auxiliar (reformular, HyDE, resumir, extraer entidades…). None si no se pudo generar.
+    """Auxiliary call (rephrase, HyDE, summarize, extract entities…). None if it couldn't generate.
 
-    Usa el modelo ayudante indicado; si no hay, el modelo cargado en VRAM."""
+    Uses the given helper model; if there isn't one, the model loaded in VRAM."""
     from . import providers
     try:
         return providers.complete(helper, prompt, max_tokens=max_tokens, temperature=0.3)
     except Exception as e:  # noqa: BLE001
-        print("[rag] llamada auxiliar al LLM falló:", e)
+        print("[rag] auxiliary LLM call failed:", e)
         return None
 
 
@@ -387,7 +387,7 @@ def _candidates(coll, col, text_query: str, vec_query: str, n_cand: int, mode: s
         res = col.query(query_embeddings=[qv], n_results=n_cand, include=["distances"], where=where)
         for r, cid in enumerate(res["ids"][0]):
             ranks.setdefault(cid, {})["vector_rank"] = r + 1
-        # Preguntas generadas (multi-vector): tercera señal independiente para la fusión RRF
+        # Generated questions (multi-vector): a third independent signal for the RRF fusion
         qc = _qcol(coll.id)
         if qc.count():
             qres = qc.query(query_embeddings=[qv], n_results=min(qc.count(), n_cand * 2), include=["metadatas"], where=where)
@@ -409,7 +409,7 @@ def _candidates(coll, col, text_query: str, vec_query: str, n_cand: int, mode: s
 def search(coll, query: str, k: int | None = None, mode: str | None = None, reranker: str | None = "__coll__",
            min_score: float | None = None, with_debug: bool = False, sources: list[str] | None = None,
            tags: list[str] | None = None, query_mode: str | None = None) -> list[dict]:
-    """Búsqueda con la configuración de la colección; cualquier parámetro puede sobrescribirse."""
+    """Search with the collection's settings; any parameter can be overridden."""
     k = k or coll.top_k or 4
     mode = mode or coll.search_mode or "hybrid"
     reranker = coll.reranker if reranker == "__coll__" else reranker
@@ -424,17 +424,17 @@ def search(coll, query: str, k: int | None = None, mode: str | None = None, rera
         return []
     n_cand = min(total, max(k * 5, 20)) if (reranker or mode == "hybrid") else min(total, k)
 
-    # Variantes de la consulta: (texto para BM25, texto para vectores)
+    # Query variants: (text for BM25, text for vectors)
     variants = [(query, query)]
     rewritten: list[str] = []
     if query_mode == "multi":
-        out = _llm("Reformula la siguiente pregunta de 3 maneras distintas (sinónimos, más específica, más general). "
-                   f"Una por línea, sin numerar ni explicar.\n\nPregunta: {query}", 160)
+        out = _llm("Rephrase the following question in 3 different ways (synonyms, more specific, more general). "
+                   f"One per line, without numbering or explaining.\n\nQuestion: {query}", 160)
         rewritten = [l.strip(" -•\t0123456789.") for l in (out or "").splitlines() if len(l.strip()) > 5][:3]
         variants += [(r, r) for r in rewritten]
     elif query_mode == "hyde":
-        out = _llm(f"Escribe un párrafo breve que responda a esta pregunta como lo haría un documento de referencia "
-                   f"(aunque no estés seguro):\n\n{query}", 180)
+        out = _llm(f"Write a short paragraph that answers this question the way a reference document would "
+                   f"(even if you're not sure):\n\n{query}", 180)
         if out:
             rewritten = [out]
             variants = [(query, query), (query, out)]
@@ -458,14 +458,14 @@ def search(coll, query: str, k: int | None = None, mode: str | None = None, rera
     for cid in cand_ids:
         doc, meta, emb = by_id[cid]
         h = {"id": cid, "text": doc, **meta, **ranks[cid]}
-        h["vector_score"] = round(float(np.dot(qvec, emb)), 4)  # similitud con la pregunta ORIGINAL
+        h["vector_score"] = round(float(np.dot(qvec, emb)), 4)  # similarity to the ORIGINAL question
         hits.append(h)
 
     if reranker:
         scores = reranker_model(reranker).predict([(query, contextual(h["text"], h)) for h in hits],
                                                   show_progress_bar=False)
         scores = np.asarray(scores, dtype=float)
-        if scores.min() < 0 or scores.max() > 1:  # logits → probabilidad
+        if scores.min() < 0 or scores.max() > 1:  # logits → probability
             scores = 1 / (1 + np.exp(-scores))
         for h, sc in zip(hits, scores):
             h["rerank_score"] = round(float(sc), 4)
@@ -485,16 +485,16 @@ def search(coll, query: str, k: int | None = None, mode: str | None = None, rera
     return hits
 
 
-AGENT_PROMPT = """Tienes que responder: «{q}»
-Fragmentos recuperados hasta ahora:
+AGENT_PROMPT = """You have to answer: “{q}”
+Chunks retrieved so far:
 {ctx}
 
-¿Tienen información suficiente para responder? Responde SOLO con JSON:
-{{"suficiente": true}}  o  {{"suficiente": false, "nueva_busqueda": "<consulta distinta para encontrar lo que falta>"}}"""
+Do they have enough information to answer? Reply with JSON ONLY:
+{{"enough": true}}  or  {{"enough": false, "new_query": "<a different query to find what's missing>"}}"""
 
 
 def agentic_search(coll, question: str, k: int | None = None, max_rounds: int = 3, **kw) -> list[dict]:
-    """RAG agéntico: busca, el LLM juzga si basta y, si no, propone otra consulta (hasta max_rounds)."""
+    """Agentic RAG: search, the LLM judges whether it's enough and, if not, proposes another query (up to max_rounds)."""
     import json as _json
     k = k or coll.top_k or 4
     seen: dict[str, dict] = {}
@@ -505,15 +505,15 @@ def agentic_search(coll, question: str, k: int | None = None, max_rounds: int = 
                 seen[h["id"]] = {**h, "round": rnd + 1, "query": queries[-1]}
         if rnd == max_rounds - 1:
             break
-        ctx = "\n".join(f"- {h['text'][:300]}" for h in list(seen.values())[:8]) or "(ninguno)"
+        ctx = "\n".join(f"- {h['text'][:300]}" for h in list(seen.values())[:8]) or "(none)"
         out = _llm(AGENT_PROMPT.format(q=question, ctx=ctx), 120)
         m = re.search(r"\{.*\}", out or "", re.S)
         try:
             d = _json.loads(m.group(0))
         except Exception:  # noqa: BLE001
             break
-        nq = (d.get("nueva_busqueda") or "").strip()
-        if d.get("suficiente") or not nq or nq in queries:
+        nq = (d.get("new_query") or "").strip()
+        if d.get("enough") or not nq or nq in queries:
             break
         queries.append(nq)
     hits = sorted(seen.values(), key=lambda h: -h["score"])[: k + 2]
@@ -523,7 +523,7 @@ def agentic_search(coll, question: str, k: int | None = None, max_rounds: int = 
 
 
 def graph_search(coll, question: str, k: int | None = None, **kw) -> list[dict]:
-    """GraphRAG: búsqueda normal + contexto del grafo (entidades/relaciones/temas) + fragmentos donde aparecen."""
+    """GraphRAG: normal search + graph context (entities/relations/topics) + the chunks where they appear."""
     from . import graph
     hits = search(coll, question, k=k, query_mode="simple", **kw)
     g = graph.query(coll, question)
@@ -535,13 +535,13 @@ def graph_search(coll, question: str, k: int | None = None, **kw) -> list[dict]:
         got = _col(coll.id).get(ids=extra_ids, include=["documents", "metadatas"])
         for i, d, m in zip(got["ids"], got["documents"], got["metadatas"]):
             hits.append({"id": i, "text": d, **m, "score": 0.5, "via_graph": True})
-    graph_hit = {"id": "graph", "text": g["context"], "source": "Grafo de conocimiento", "score": 1.0,
+    graph_hit = {"id": "graph", "text": g["context"], "source": "Knowledge graph", "score": 1.0,
                  "section": ", ".join(g["seeds"][:4]), "graph": {k2: g[k2] for k2 in ("seeds", "neighbors", "relations", "communities")}}
     return [graph_hit] + hits
 
 
 def retrieve(coll, question: str, **kw) -> list[dict]:
-    """Recupera según el modo de consulta de la colección (agéntico, grafo o búsqueda normal)."""
+    """Retrieves according to the collection's query mode (agentic, graph or normal search)."""
     qm = kw.pop("query_mode", None) or getattr(coll, "query_mode", "simple")
     if qm == "agentic":
         return agentic_search(coll, question, **kw)
@@ -554,36 +554,36 @@ def prepare(coll, question: str, history: list[dict] | None = None, system_promp
             rag_system_prompt: str | None = None, k: int | None = None, min_score: float | None = None,
             sources: list[str] | None = None, tags: list[str] | None = None
             ) -> tuple[list[dict], list[dict], str]:
-    """Construye los mensajes para el LLM. Devuelve (mensajes, fragmentos, modo) con modo: rag | no_context | refuse."""
+    """Builds the messages for the LLM. Returns (messages, chunks, mode) with mode: rag | no_context | refuse."""
     hits = retrieve(coll, question, k=k, min_score=min_score, sources=sources, tags=tags)
     msgs, mode = messages_for(coll, question, hits, history, system_prompt, rag_system_prompt)
     return msgs, hits, mode
 
 
-def contexto_excedido(ctx: str, pregunta: str = "") -> str | None:
-    """¿El contexto no va a caber en la ventana del modelo cargado?
+def context_overflow(ctx: str, question: str = "") -> str | None:
+    """Will the context not fit in the loaded model's window?
 
-    Cuando no cabe, llama.cpp y transformers lo recortan por el principio sin decir nada: el modelo
-    responde con la mitad de los fragmentos y parece que el RAG no encontró la información, cuando
-    en realidad la encontró y se tiró por el camino. Avisar es la diferencia entre depurar el
-    troceo o volverse loco con la búsqueda."""
+    When it doesn't fit, llama.cpp and transformers silently cut it from the start: the model
+    answers with half the chunks and it looks like RAG didn't find the information, when
+    it actually found it and lost it on the way. Warning about it is the difference between debugging the
+    chunking and going crazy over the search."""
     from .inference import manager
 
     cur = manager.current
     if not cur:
         return None
-    ventana = getattr(cur, "n_ctx", 0) or 8192
-    # ~3,5 caracteres por token en español, y se reserva sitio para la respuesta
-    tokens = int((len(ctx) + len(pregunta)) / 3.5)
-    if tokens > ventana * 0.75:
-        return (f"El contexto ocupa ~{tokens} tokens y la ventana del modelo es {ventana}: "
-                f"se recortará. Baja «Fragmentos por respuesta» o el tamaño de troceo.")
+    window = getattr(cur, "n_ctx", 0) or 8192
+    # ~3.5 characters per token, and room is kept for the answer
+    tokens = int((len(ctx) + len(question)) / 3.5)
+    if tokens > window * 0.75:
+        return (f"The context takes ~{tokens} tokens and the model's window is {window}: "
+                f"it will be cut. Lower “Chunks per answer” or the chunk size.")
     return None
 
 
 def messages_for(coll, question: str, hits: list[dict], history: list[dict] | None = None,
                  system_prompt: str | None = None, rag_system_prompt: str | None = None) -> tuple[list[dict], str]:
-    """Mensajes a partir de fragmentos ya recuperados, aplicando el fallback de la colección si no hay ninguno."""
+    """Messages from already retrieved chunks, applying the collection's fallback if there are none."""
     if hits:
         return build_messages(question, hits, rag_system_prompt, history), "rag"
     if coll.fallback == "refuse":
@@ -598,18 +598,18 @@ def build_messages(question: str, hits: list[dict], system_prompt: str | None = 
     def label(h):
         parts = [h.get("source") or ""]
         if h.get("page"):
-            parts.append(f"pág. {h['page']}")
+            parts.append(f"p. {h['page']}")
         if h.get("section"):
             parts.append(h["section"])
         return " · ".join(p for p in parts if p)
 
     ctx = "\n\n".join(f"[{i + 1}] ({label(h)})\n{h['text']}" for i, h in enumerate(hits))
-    aviso = contexto_excedido(ctx, question)
-    if aviso:
-        print(f"[rag] {aviso}")
+    warning = context_overflow(ctx, question)
+    if warning:
+        print(f"[rag] {warning}")
     msgs = [{"role": "system", "content": system_prompt or DEFAULT_RAG_SYSTEM}]
     msgs += history or []
-    msgs.append({"role": "user", "content": f"Contexto:\n{ctx}\n\nPregunta: {question}"})
+    msgs.append({"role": "user", "content": f"Context:\n{ctx}\n\nQuestion: {question}"})
     return msgs
 
 
@@ -624,7 +624,7 @@ def sample_chunks(collection_id: int, n: int) -> list[dict]:
     return [{"text": got["documents"][i], **got["metadatas"][i]} for i in idx]
 
 
-# ---------------- benchmark de recuperación ----------------
+# ---------------- retrieval benchmark ----------------
 def _is_hit(q: dict, chunk: str, expected_vec) -> bool:
     kws = q.get("keywords") or []
     if kws:
@@ -637,7 +637,7 @@ def _is_hit(q: dict, chunk: str, expected_vec) -> bool:
 
 
 def benchmark(coll, questions: list[dict], k: int, configs: list[dict]) -> list[dict]:
-    """Compara configuraciones de búsqueda: hit rate@k y MRR usando palabras clave (o la referencia)."""
+    """Compares search configurations: hit rate@k and MRR using keywords (or the reference)."""
     exp_vecs = {}
     for i, q in enumerate(questions):
         if not q.get("keywords") and q.get("expected"):
@@ -663,17 +663,17 @@ def benchmark(coll, questions: list[dict], k: int, configs: list[dict]) -> list[
     return out
 
 
-# ---------------- enriquecimiento: preguntas por fragmento ----------------
-ENRICH_PROMPT = """Lee el FRAGMENTO y escribe {n} preguntas distintas y concretas que se respondan con él,
-tal como las haría un usuario. Una por línea, sin numerar. Después una línea que empiece por
-"CLAVES:" con 3-6 palabras clave separadas por comas.
+# ---------------- enrichment: questions per chunk ----------------
+ENRICH_PROMPT = """Read the CHUNK and write {n} different, specific questions that it answers,
+the way a user would ask them. One per line, without numbering. Then one line starting with
+"KEYWORDS:" with 3-6 comma-separated keywords.
 
-FRAGMENTO:
+CHUNK:
 {text}"""
 
 
 def enrich(coll, task, n_questions: int = 3, sources: list[str] | None = None, overwrite: bool = False) -> dict:
-    """Genera con el LLM cargado preguntas y palabras clave por fragmento y re-indexa (mejora el recall)."""
+    """Generates questions and keywords per chunk with the loaded LLM and re-indexes (improves recall)."""
     col = _col(coll.id)
     got = col.get(where={"source": {"$in": sources}} if sources else None, include=["documents", "metadatas"])
     todo = [(i, d, m) for i, d, m in zip(got["ids"], got["documents"], got["metadatas"])
@@ -682,16 +682,16 @@ def enrich(coll, task, n_questions: int = 3, sources: list[str] | None = None, o
     for n, (cid, doc, meta) in enumerate(todo):
         if task.cancel_requested:
             break
-        task.update(n / max(1, len(todo)), f"Fragmento {n + 1}/{len(todo)} · {meta.get('source')}")
+        task.update(n / max(1, len(todo)), f"Chunk {n + 1}/{len(todo)} · {meta.get('source')}")
         out = _llm(ENRICH_PROMPT.format(n=n_questions, text=doc[:2500]), 220)
         if not out:
             failed += 1
             if n == 0:
-                raise RuntimeError("Carga un modelo (Playground o Modelos) para generar las preguntas")
+                raise RuntimeError("Load a model (Playground or Models) to generate the questions")
             continue
         lines = [l.strip(" -•\t") for l in out.splitlines() if l.strip()]
-        kws = next((l.split(":", 1)[1].strip() for l in lines if l.upper().startswith("CLAVES")), "")
-        qs = [re.sub(r"^\d+[.)]\s*", "", l) for l in lines if not l.upper().startswith("CLAVES") and len(l) > 8][:n_questions]
+        kws = next((l.split(":", 1)[1].strip() for l in lines if l.upper().startswith(("KEYWORDS", "CLAVES"))), "")
+        qs = [re.sub(r"^\d+[.)]\s*", "", l) for l in lines if not l.upper().startswith(("KEYWORDS", "CLAVES")) and len(l) > 8][:n_questions]
         meta = {**meta, "questions": "\n".join(qs), "keywords": kws}
         col.update(ids=[cid], metadatas=[meta])
         _index_questions(coll.id, coll.embed_model, cid, meta)
@@ -700,17 +700,17 @@ def enrich(coll, task, n_questions: int = 3, sources: list[str] | None = None, o
     return {"enriched": done, "failed": failed, "pending": len(todo) - done - failed}
 
 
-# ---------------- resúmenes jerárquicos (tipo RAPTOR) ----------------
-SUMMARY_PROMPT = """Resume el siguiente texto en un párrafo de 4-6 frases, conservando nombres, cifras y
-conclusiones importantes. Sólo el resumen.
+# ---------------- hierarchical summaries (RAPTOR-style) ----------------
+SUMMARY_PROMPT = """Summarize the following text in one paragraph of 4-6 sentences, keeping important names, figures and
+conclusions. Only the summary.
 
-TEXTO:
+TEXT:
 {text}"""
 
 
 def build_summaries(coll, task, group: int = 6, sources: list[str] | None = None) -> dict:
-    """Crea fragmentos-resumen por grupos de fragmentos consecutivos (nivel 1) y un resumen del documento
-    (nivel 2). Sirven para preguntas globales ("¿de qué trata…?", "resume…") que ningún fragmento responde solo."""
+    """Creates summary chunks for groups of consecutive chunks (level 1) and a summary of the document
+    (level 2). They serve global questions ("what is … about?", "summarize…") that no single chunk answers."""
     col = _col(coll.id)
     got = col.get(where={"source": {"$in": sources}} if sources else None, include=["documents", "metadatas"])
     by_doc: dict[str, list[tuple[int, str]]] = {}
@@ -725,19 +725,19 @@ def build_summaries(coll, task, group: int = 6, sources: list[str] | None = None
         items.sort()
         level1 = []
         for gi in range(0, len(items), group):
-            task.update(done / max(1, total), f"Resumiendo {src} ({gi // group + 1})")
+            task.update(done / max(1, total), f"Summarizing {src} ({gi // group + 1})")
             text = "\n\n".join(t for _, t in items[gi:gi + group])[:9000]
             summ = _llm(SUMMARY_PROMPT.format(text=text), 320)
             done += 1
             if not summ:
-                raise RuntimeError("Carga un modelo para generar los resúmenes")
+                raise RuntimeError("Load a model to generate the summaries")
             level1.append(summ)
         top = _llm(SUMMARY_PROMPT.format(text="\n\n".join(level1)[:9000]), 400) if len(level1) > 1 else None
         done += 1
-        rows = [(t, {"source": src, "section": f"Resumen parte {i + 1}", "level": 1, "chunk": 10000 + i})
+        rows = [(t, {"source": src, "section": f"Summary part {i + 1}", "level": 1, "chunk": 10000 + i})
                 for i, t in enumerate(level1)]
         if top:
-            rows.append((top, {"source": src, "section": "Resumen del documento", "level": 2, "chunk": 20000}))
+            rows.append((top, {"source": src, "section": "Document summary", "level": 2, "chunk": 20000}))
         h = hashlib.sha1(src.encode()).hexdigest()[:8]
         col.add(ids=[f"sum-{h}-{m['level']}-{m['chunk']}" for _, m in rows], documents=[t for t, _ in rows],
                 metadatas=[m for _, m in rows], embeddings=embed(coll.embed_model, [contextual(t, m) for t, m in rows]))
@@ -746,9 +746,9 @@ def build_summaries(coll, task, group: int = 6, sources: list[str] | None = None
     return {"summaries": created, "documents": len(by_doc)}
 
 
-# ---------------- imágenes de los documentos (multimodal) ----------------
-CAPTION_PROMPT = ("Describe esta imagen de un documento en 2-4 frases, en español. Si es un gráfico, tabla o diagrama, "
-                  "explica qué representa e incluye los datos o etiquetas legibles. Sé concreto, sin preámbulos.")
+# ---------------- document images (multimodal) ----------------
+CAPTION_PROMPT = ("Describe this image from a document in 2-4 sentences. If it's a chart, table or diagram, "
+                  "explain what it shows and include the readable data or labels. Be specific, with no preamble.")
 
 
 def images_dir(collection_id: int) -> Path:
@@ -758,7 +758,7 @@ def images_dir(collection_id: int) -> Path:
 
 
 def extract_images(pdf_bytes: bytes, min_px: int = 160) -> list[tuple[bytes, dict]]:
-    """Imágenes embebidas en un PDF (descarta iconos y adornos pequeños)."""
+    """Images embedded in a PDF (small icons and ornaments are discarded)."""
     import pymupdf
     doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     out: list[tuple[bytes, dict]] = []
@@ -777,17 +777,17 @@ def extract_images(pdf_bytes: bytes, min_px: int = 160) -> list[tuple[bytes, dic
                     pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
                 out.append((pix.tobytes("png"), {"page": pno, "width": pix.width, "height": pix.height}))
             except Exception as e:  # noqa: BLE001
-                print("[rag] imagen no extraíble:", e)
+                print("[rag] image can't be extracted:", e)
     return out
 
 
 def caption_images(coll, task, sources: list[str] | None = None, min_px: int = 160, max_images: int | None = None) -> dict:
-    """Extrae las imágenes de los PDF indexados y las describe con el VLM cargado; cada descripción es un fragmento
-    buscable que enlaza a la imagen (se muestra como fuente)."""
+    """Extracts the images of the indexed PDFs and describes them with the loaded VLM; each description is a searchable
+    chunk that links to the image (it's shown as a source)."""
     from .inference import GenParams, manager
     cur = manager.current
     if not cur or getattr(cur, "processor", None) is None:
-        raise RuntimeError("Carga un modelo de visión (p. ej. Qwen/Qwen2.5-VL-3B-Instruct) para describir imágenes")
+        raise RuntimeError("Load a vision model (e.g. Qwen/Qwen2.5-VL-3B-Instruct) to describe images")
     col = _col(coll.id)
     docs = [d for d in (coll.documents or []) if (sources is None or d in sources)]
     jobs: list[tuple[str, bytes, dict]] = []
@@ -798,15 +798,15 @@ def caption_images(coll, task, sources: list[str] | None = None, min_px: int = 1
         for img, meta in extract_images(p.read_bytes(), min_px):
             jobs.append((d, img, meta))
     if not jobs:
-        raise RuntimeError("No se encontraron imágenes en los PDF indexados (¿los subiste antes de esta versión? "
-                           "vuelve a subirlos para guardar el original)")
+        raise RuntimeError("No images were found in the indexed PDFs (did you upload them before this version? "
+                           "upload them again to keep the original)")
     if max_images:
         jobs = jobs[:max_images]
     added = 0
     for i, (doc, img, meta) in enumerate(jobs):
         if task.cancel_requested:
             break
-        task.update(i / len(jobs), f"Imagen {i + 1}/{len(jobs)} · {doc}")
+        task.update(i / len(jobs), f"Image {i + 1}/{len(jobs)} · {doc}")
         name = f"{hashlib.sha1(img).hexdigest()[:12]}.png"
         path = images_dir(coll.id) / name
         path.write_bytes(img)
@@ -815,9 +815,9 @@ def caption_images(coll, task, sources: list[str] | None = None, min_px: int = 1
         caption = re.sub(r"<think>.*?</think>", "", caption, flags=re.S).strip()
         if not caption:
             continue
-        m = {"source": doc, "page": meta["page"], "section": f"Imagen (pág. {meta['page']})", "image": name,
+        m = {"source": doc, "page": meta["page"], "section": f"Image (p. {meta['page']})", "image": name,
              "chunk": 30000 + i, "kind": "image"}
-        text = f"[Imagen en {Path(doc).name}, página {meta['page']}] {caption}"
+        text = f"[Image in {Path(doc).name}, page {meta['page']}] {caption}"
         col.add(ids=[f"img-{name}"], documents=[text], metadatas=[m], embeddings=embed(coll.embed_model, [contextual(text, m)]))
         added += 1
     invalidate(coll.id)

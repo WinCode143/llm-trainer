@@ -1,8 +1,8 @@
-"""Pruebas de las piezas que se romperían en silencio: normalización de datasets, troceado, BM25,
-recompensas de GRPO, extracción de documentos y las herramientas de los agentes.
+"""Tests for the pieces that would break silently: dataset normalization, chunking, BM25,
+GRPO rewards, document extraction and the agents' tools.
 
-Ejecutar:  cd backend && .venv/bin/python -m pytest -q
-No cargan modelos ni GPU: son rápidas (segundos).
+Run:  cd backend && uv run pytest -q
+They load no models and need no GPU: they're fast (seconds).
 """
 import io
 import json
@@ -18,305 +18,305 @@ from app.workers import rewards
 
 
 # ---------------------------------------------------------------- datasets
-def test_detecta_y_normaliza_alpaca():
-    fmt, rows = ds.normalize([{"instruction": "¿Capital de Francia?", "output": "París"}])
+def test_detects_and_normalizes_alpaca():
+    fmt, rows = ds.normalize([{"instruction": "Capital of France?", "output": "Paris"}])
     assert fmt == "chat"
-    assert rows[0]["messages"] == [{"role": "user", "content": "¿Capital de Francia?"},
-                                   {"role": "assistant", "content": "París"}]
+    assert rows[0]["messages"] == [{"role": "user", "content": "Capital of France?"},
+                                   {"role": "assistant", "content": "Paris"}]
 
 
-def test_normaliza_sharegpt_y_system_prompt():
-    fmt, rows = ds.normalize([{"conversations": [{"from": "human", "value": "hola"}, {"from": "gpt", "value": "¡hola!"}]}],
-                             system_prompt="Eres útil")
-    assert fmt == "chat" and rows[0]["messages"][0] == {"role": "system", "content": "Eres útil"}
+def test_normalizes_sharegpt_and_system_prompt():
+    fmt, rows = ds.normalize([{"conversations": [{"from": "human", "value": "hi"}, {"from": "gpt", "value": "hello!"}]}],
+                             system_prompt="You are helpful")
+    assert fmt == "chat" and rows[0]["messages"][0] == {"role": "system", "content": "You are helpful"}
 
 
-def test_normaliza_preferencias_con_listas():
-    fmt, rows = ds.normalize([{"prompt": "p", "chosen": [{"role": "assistant", "content": "buena"}],
-                               "rejected": [{"role": "assistant", "content": "mala"}]}])
-    assert fmt == "preference" and rows[0]["chosen"] == "buena" and rows[0]["rejected"] == "mala"
+def test_normalizes_preferences_given_as_lists():
+    fmt, rows = ds.normalize([{"prompt": "p", "chosen": [{"role": "assistant", "content": "good"}],
+                               "rejected": [{"role": "assistant", "content": "bad"}]}])
+    assert fmt == "preference" and rows[0]["chosen"] == "good" and rows[0]["rejected"] == "bad"
 
 
-def test_descarta_ejemplos_sin_respuesta():
-    _, rows = ds.normalize([{"instruction": "sin respuesta", "output": ""},
-                            {"instruction": "ok", "output": "respuesta"}])
+def test_drops_examples_without_an_answer():
+    _, rows = ds.normalize([{"instruction": "no answer", "output": ""},
+                            {"instruction": "ok", "output": "answer"}])
     assert len(rows) == 1
 
 
-def test_formato_desconocido_falla():
+def test_unknown_format_fails():
     with pytest.raises(ValueError):
-        ds.normalize([{"campo_raro": 1}])
+        ds.normalize([{"odd_field": 1}])
 
 
-def test_lee_csv_y_txt():
-    assert ds._read_records("a.csv", b"instruction,output\nhola,adios\n")[0]["output"] == "adios"
-    assert len(ds._read_records("a.txt", b"parrafo uno\n\nparrafo dos")) == 2
+def test_reads_csv_and_txt():
+    assert ds._read_records("a.csv", b"instruction,output\nhello,bye\n")[0]["output"] == "bye"
+    assert len(ds._read_records("a.txt", b"paragraph one\n\nparagraph two")) == 2
 
 
-def test_split_reparte_todo():
+def test_split_keeps_every_row():
     rows = [{"text": str(i)} for i in range(100)]
     train, ev = ds.split(rows, 0.2)
     assert len(train) == 80 and len(ev) == 20 and len(train) + len(ev) == len(rows)
 
 
-# ---------------------------------------------------------------- troceado
-def test_chunking_respeta_tamano_y_solapa():
-    texto = ". ".join(f"Frase número {i} con algo de relleno" for i in range(60))
-    chunks = rag.chunk_text(texto, 200, 40)
+# ---------------------------------------------------------------- chunking
+def test_chunking_respects_size_and_overlaps():
+    text = ". ".join(f"Sentence number {i} with some filler" for i in range(60))
+    chunks = rag.chunk_text(text, 200, 40)
     assert chunks and all(len(c) <= 260 for c in chunks)
     assert len(chunks) > 1
 
 
-def test_secciones_anidan_por_nivel():
+def test_sections_nest_by_level():
     secs, _ = rag.split_sections("## A\na\n### A1\na1\n## B\nb")
     assert [s for s, _ in secs] == ["A", "A › A1", "B"]
 
 
-def test_plantilla_qa_separa_preguntas():
-    pages = [("¿Uno?\nrespuesta uno\n¿Dos?\nrespuesta dos", {})]
+def test_qa_template_splits_questions():
+    pages = [("One?\nanswer one\nTwo?\nanswer two", {})]
     chunks = rag.make_chunks("faq.md", pages, 800, 0, "qa")
     assert len(chunks) == 2
 
 
-def test_plantilla_laws_separa_articulos():
-    pages = [("Artículo 1. Objeto\nx\nArtículo 2. Horario\ny", {})]
-    assert len(rag.make_chunks("ley.txt", pages, 800, 0, "laws")) == 2
+def test_laws_template_splits_articles():
+    pages = [("Article 1. Purpose\nx\nArticle 2. Hours\ny", {})]
+    assert len(rag.make_chunks("law.txt", pages, 800, 0, "laws")) == 2
 
 
-def test_plantilla_table_una_fila_por_fragmento():
+def test_table_template_one_row_per_chunk():
     chunks = rag.make_chunks("t.csv", [("a,b\n1,2\n3,4", {})], 800, 0, "table")
     assert [c for c, _ in chunks] == ["a: 1; b: 2", "a: 3; b: 4"]
 
 
-def test_html_ignora_scripts_y_conserva_titulos():
-    html = "<html><head><style>x{}</style></head><body><nav><img src=x></nav><h2>Título</h2><p>Texto visible</p><script>1</script></body></html>"
+def test_html_ignores_scripts_and_keeps_headings():
+    html = "<html><head><style>x{}</style></head><body><nav><img src=x></nav><h2>Title</h2><p>Visible text</p><script>1</script></body></html>"
     md = rag._html(html)
-    assert "## Título" in md and "Texto visible" in md and "x{}" not in md and "1" not in md.split("Texto visible")[1]
+    assert "## Title" in md and "Visible text" in md and "x{}" not in md and "1" not in md.split("Visible text")[1]
 
 
 # ---------------------------------------------------------------- BM25
-def test_bm25_ignora_acentos_y_ordena():
-    idx = rag.BM25(["a", "b"], ["El reactor opera a 612 grados", "La reina Ilsa fundó Freedonia"],
+def test_bm25_folds_accents_and_ranks():
+    idx = rag.BM25(["a", "b"], ["The reactor runs at 612 degrees", "Queen Ilsa founded Fréédonia"],
                    sources=["s1", "s2"])
-    assert idx.search("¿quién fundó FREEDONIA?", 2)[0][0] == "b"
+    assert idx.search("who founded FREEDONIA?", 2)[0][0] == "b"
 
 
-def test_bm25_filtra_por_documento():
-    idx = rag.BM25(["a", "b"], ["texto sobre gatos", "texto sobre gatos"], sources=["uno", "dos"])
-    assert [i for i, _ in idx.search("gatos", 5, allowed={"dos"})] == ["b"]
+def test_bm25_filters_by_document():
+    idx = rag.BM25(["a", "b"], ["text about cats", "text about cats"], sources=["one", "two"])
+    assert [i for i, _ in idx.search("cats", 5, allowed={"two"})] == ["b"]
 
 
-# ---------------------------------------------------------------- recompensas GRPO
+# ---------------------------------------------------------------- GRPO rewards
 def _c(text):
     return [[{"role": "assistant", "content": text}]]
 
 
-def test_recompensa_correccion():
-    alta = rewards.correctness(None, _c("La capital es Villa Aurora"), ["La capital es Villa Aurora"])[0]
-    baja = rewards.correctness(None, _c("No lo sé"), ["La capital es Villa Aurora"])[0]
-    assert alta > 1.5 > baja
+def test_correctness_reward():
+    high = rewards.correctness(None, _c("The capital is Aurora City"), ["The capital is Aurora City"])[0]
+    low = rewards.correctness(None, _c("I don't know"), ["The capital is Aurora City"])[0]
+    assert high > 1.5 > low
 
 
-def test_recompensa_formato_razonamiento():
-    assert rewards.reasoning_format(None, _c("<think>lo pienso bastante</think> Respuesta"))[0] == 1.0
-    assert rewards.reasoning_format(None, _c("Respuesta directa"))[0] == 0.0
+def test_reasoning_format_reward():
+    assert rewards.reasoning_format(None, _c("<think>I think about it quite a bit</think> Answer"))[0] == 1.0
+    assert rewards.reasoning_format(None, _c("Direct answer"))[0] == 0.0
 
 
-def test_recompensa_longitud_penaliza_el_exceso():
-    corto = rewards.make_length(10)(None, _c(" ".join(["x"] * 10)))[0]
-    largo = rewards.make_length(10)(None, _c(" ".join(["x"] * 25)))[0]
-    assert corto == 1.0 and largo == 0.0
+def test_length_reward_penalizes_excess():
+    short = rewards.make_length(10)(None, _c(" ".join(["x"] * 10)))[0]
+    long = rewards.make_length(10)(None, _c(" ".join(["x"] * 25)))[0]
+    assert short == 1.0 and long == 0.0
 
 
-# ---------------------------------------------------------------- herramientas de agentes
-def test_calculadora_admite_porcentajes_y_rechaza_codigo():
-    assert T.TOOLS["calculator"]["run"]({}, {"expression": "12% de 3.382.662"}).startswith("405")
+# ---------------------------------------------------------------- agent tools
+def test_calculator_handles_percentages_and_rejects_code():
+    assert T.TOOLS["calculator"]["run"]({}, {"expression": "12% of 3,382,662"}).startswith("405")
     assert "Error" in T.TOOLS["calculator"]["run"]({}, {"expression": "__import__('os').listdir()"})
 
 
-def test_sql_solo_lectura():
+def test_sql_is_read_only():
     run = T.TOOLS["sql_query"]["run"]
     assert "Error" in run({"url": "sqlite:///:memory:"}, {"query": "delete from x"})
     assert "Error" in run({"url": "sqlite:///:memory:"}, {"query": "select 1; drop table x"})
 
 
-def test_archivos_no_salen_de_la_carpeta(tmp_path):
+def test_files_cant_leave_the_folder(tmp_path):
     cfg = {"root_dir": str(tmp_path)}
-    (tmp_path / "dentro.txt").write_text("ok")
-    assert T.TOOLS["read_file"]["run"](cfg, {"path": "dentro.txt"}) == "ok"
+    (tmp_path / "inside.txt").write_text("ok")
+    assert T.TOOLS["read_file"]["run"](cfg, {"path": "inside.txt"}) == "ok"
     assert "Error" in T.TOOLS["read_file"]["run"](cfg, {"path": "../../etc/passwd"})
-    assert "Error" in T.TOOLS["write_file"]["run"](cfg, {"path": "../fuera.txt", "content": "x"})
+    assert "Error" in T.TOOLS["write_file"]["run"](cfg, {"path": "../outside.txt", "content": "x"})
 
 
-def test_http_exige_dominios_autorizados():
-    assert "no está autorizado" in T.TOOLS["http_request"]["run"]({"allowed_hosts": "ok.com"}, {"url": "https://malo.com/x"})
+def test_http_requires_allowed_domains():
+    assert "isn't allowed" in T.TOOLS["http_request"]["run"]({"allowed_hosts": "ok.com"}, {"url": "https://bad.com/x"})
 
 
-# ---------------------------------------------------------------- grafo y agentes
-def test_grafo_recupera_json_cortado():
-    truncado = '{"entidades": [{"nombre": "Ana", "tipo": "persona", "descripcion": "x"}, {"nombre": "Luis"'
-    assert graph._parse(truncado)["entidades"][0]["nombre"] == "Ana"
+# ---------------------------------------------------------------- graph and agents
+def test_graph_recovers_truncated_json():
+    truncated = '{"entities": [{"name": "Ann", "type": "person", "description": "x"}, {"name": "Louis"'
+    assert graph._parse(truncated)["entities"][0]["name"] == "Ann"
 
 
-def test_grafo_normaliza_nombres():
-    assert graph.norm("El Imperio Romano") == "imperio romano"
+def test_graph_normalizes_names():
+    assert graph.norm("The Roman Empire") == "roman empire"
 
 
-def test_parseo_de_llamadas_a_herramientas():
+def test_parses_tool_calls():
     from app.services.agents import parse_calls, visible_text
-    texto = 'Voy a mirarlo <tool_call>{"name": "buscar_web", "arguments": {"query": "x"}}</tool_call>'
-    calls = parse_calls(texto)
-    assert calls == [{"name": "buscar_web", "arguments": {"query": "x"}}]
-    assert visible_text(texto) == "Voy a mirarlo"
+    text = 'Let me check <tool_call>{"name": "search_web", "arguments": {"query": "x"}}</tool_call>'
+    calls = parse_calls(text)
+    assert calls == [{"name": "search_web", "arguments": {"query": "x"}}]
+    assert visible_text(text) == "Let me check"
 
 
-def test_parseo_acepta_bloque_json():
+def test_parsing_accepts_a_json_block():
     from app.services.agents import parse_calls
-    assert parse_calls('```json\n{"name": "calcular", "arguments": {"expression": "2+2"}}\n```')[0]["name"] == "calcular"
+    assert parse_calls('```json\n{"name": "calculate", "arguments": {"expression": "2+2"}}\n```')[0]["name"] == "calculate"
 
 
-# ---------------------------------------------------------------- aislamiento del código
-def test_sandbox_disponible_o_avisa():
+# ---------------------------------------------------------------- code sandbox
+def test_sandbox_available_or_warns():
     from app.services import sandbox
     st = sandbox.status()
-    assert st["backend"] in ("bubblewrap", "ninguno") and isinstance(st["available"], bool)
+    assert st["backend"] in ("bubblewrap", "none") and isinstance(st["available"], bool)
 
 
 @pytest.mark.skipif(not __import__("app.services.sandbox", fromlist=["x"]).available(),
-                    reason="bubblewrap no disponible")
+                    reason="bubblewrap not available")
 class TestSandbox:
-    def test_ejecuta_codigo_normal(self):
+    def test_runs_normal_code(self):
         from app.services import sandbox
         assert sandbox.run_python("print(2**10)")["output"] == "1024"
 
-    def test_no_ve_los_datos_del_proyecto(self):
+    def test_cant_see_the_project_data(self):
         from app.config import settings
         from app.services import sandbox
         r = sandbox.run_python(f"import os; print(os.path.exists({str(settings.db_path)!r}))")
         assert r["output"] == "False"
 
-    def test_lo_que_escribe_no_sale(self, tmp_path):
+    def test_what_it_writes_doesnt_get_out(self, tmp_path):
         from app.services import sandbox
-        destino = tmp_path / "fuga.txt"
-        sandbox.run_python(f"open({str(destino)!r}, 'w').write('x')")
-        assert not destino.exists()
+        destination = tmp_path / "leak.txt"
+        sandbox.run_python(f"open({str(destination)!r}, 'w').write('x')")
+        assert not destination.exists()
 
-    def test_sin_red_por_defecto(self):
+    def test_no_network_by_default(self):
         from app.services import sandbox
         r = sandbox.run_python("import urllib.request; urllib.request.urlopen('https://example.com', timeout=5)")
         assert "Error" in r["error"] or "error" in r["error"].lower()
 
-    def test_carpeta_de_datos_en_solo_lectura(self, tmp_path):
+    def test_read_only_data_folder(self, tmp_path):
         from app.services import sandbox
-        (tmp_path / "dato.txt").write_text("hola")
-        r = sandbox.run_python("print(open('/datos/dato.txt').read())", ro_dir=str(tmp_path))
-        assert r["output"] == "hola"
-        r2 = sandbox.run_python("open('/datos/nuevo.txt','w').write('x')", ro_dir=str(tmp_path))
-        assert not (tmp_path / "nuevo.txt").exists() and r2["error"]
+        (tmp_path / "datum.txt").write_text("hello")
+        r = sandbox.run_python("print(open('/data/datum.txt').read())", ro_dir=str(tmp_path))
+        assert r["output"] == "hello"
+        r2 = sandbox.run_python("open('/data/new.txt','w').write('x')", ro_dir=str(tmp_path))
+        assert not (tmp_path / "new.txt").exists() and r2["error"]
 
-    def test_limite_de_tiempo(self):
+    def test_time_limit(self):
         from app.services import sandbox
         assert sandbox.run_python("while True: pass", timeout_s=3)["timeout"] is True
 
 
-# --------------------------------------------------------------------- flujos
+# --------------------------------------------------------------------- flows
 class TestFlows:
-    """El compilador de flujos: plantillas válidas, condiciones seguras y avisos de validación."""
+    """The flow compiler: valid templates, safe conditions and validation warnings."""
 
-    def test_plantillas_compilan(self):
-        """Las plantillas tienen que compilar. Los únicos avisos admitidos son los de elegir una
-        colección o un servidor MCP: dependen de lo que tenga cada uno y se rellenan al usarlas."""
+    def test_templates_compile(self):
+        """The templates have to compile. The only warnings allowed are choosing a
+        collection or an MCP server: they depend on what each user has and are filled in when used."""
         from app.services import flows
         for key, tpl in flows.TEMPLATES.items():
-            avisos = [a for a in flows.validate(tpl["spec"]) if "colección" not in a and "servidor MCP" not in a]
-            assert not avisos, f"la plantilla {key} genera avisos inesperados: {avisos}"
-            flows.compile_flow(tpl["spec"])  # no debe lanzar
+            warnings = [a for a in flows.validate(tpl["spec"]) if "collection" not in a and "MCP server" not in a]
+            assert not warnings, f"the {key} template produces unexpected warnings: {warnings}"
+            flows.compile_flow(tpl["spec"])  # must not raise
 
-    def test_exportar_a_codigo_produce_python_valido(self):
-        """El exportador es la puerta de salida: si genera código roto, no sirve de nada."""
+    def test_export_to_code_produces_valid_python(self):
+        """The exporter is the way out: if it generates broken code, it's useless."""
         import ast
         from app.services import flows
         for key, tpl in flows.TEMPLATES.items():
             code = flows.to_python(tpl["spec"], key)
-            ast.parse(code)  # lanza SyntaxError si está mal
-            assert "StateGraph" in code and "def construir()" in code
+            ast.parse(code)  # raises SyntaxError if it's wrong
+            assert "StateGraph" in code and "def build()" in code
 
-    def test_condiciones_del_router_se_traducen_al_exportar(self):
-        """En el editor se escribe `apoyada == True`; en el código exportado esa variable vive en el estado."""
+    def test_router_conditions_are_translated_on_export(self):
+        """In the editor you write `supported == True`; in the exported code that variable lives in the state."""
         from app.services.flows import _cond_py
-        assert _cond_py("apoyada == True") == "v.get('apoyada') == True"
-        assert _cond_py("len(texto) > 3") == "len(v.get('texto')) > 3"
+        assert _cond_py("supported == True") == "v.get('supported') == True"
+        assert _cond_py("len(text) > 3") == "len(v.get('text')) > 3"
 
-    def test_listas_se_renderizan_legibles(self):
-        """Una lista puesta en un prompt no puede salir como ['a', 'b'] con corchetes."""
+    def test_lists_render_readably(self):
+        """A list put into a prompt can't come out as ['a', 'b'] with brackets."""
         from app.services.flows import render
-        assert render("{xs}", {"xs": ["pan", "leche"]}) == "1. pan\n2. leche"
+        assert render("{xs}", {"xs": ["bread", "milk"]}) == "1. bread\n2. milk"
 
-    def test_para_cada_convierte_texto_en_lista(self):
+    def test_for_each_turns_text_into_a_list(self):
         from app.services.flows import _as_list
-        assert _as_list("uno\ndos\n\ntres") == ["uno", "dos", "tres"]
+        assert _as_list("one\ntwo\n\nthree") == ["one", "two", "three"]
         assert _as_list(["a", "b"]) == ["a", "b"]
 
-    def test_render_variable_ausente_no_rompe(self):
+    def test_missing_variable_doesnt_break_render(self):
         from app.services.flows import render
-        assert render("hola {quien}, {falta}", {"quien": "mundo"}) == "hola mundo, "
+        assert render("hello {who}, {missing}", {"who": "world"}) == "hello world, "
 
-    def test_condiciones(self):
+    def test_conditions(self):
         from app.services.flows import eval_condition
-        assert eval_condition("apoyada == True", {"apoyada": True})
-        assert eval_condition("len(texto) > 3", {"texto": "abcd"})
-        assert not eval_condition("tipo in opciones", {"tipo": "x", "opciones": ["a"]})
-        # nada de llamadas arbitrarias ni acceso a atributos
+        assert eval_condition("supported == True", {"supported": True})
+        assert eval_condition("len(text) > 3", {"text": "abcd"})
+        assert not eval_condition("kind in options", {"kind": "x", "options": ["a"]})
+        # no arbitrary calls or attribute access
         assert not eval_condition("__import__('os').system('ls')", {})
-        assert not eval_condition("texto.upper()", {"texto": "a"})
+        assert not eval_condition("text.upper()", {"text": "a"})
 
-    def test_validate_detecta_nodos_sueltos(self):
+    def test_validate_flags_loose_nodes(self):
         from app.services.flows import validate
         spec = {"nodes": [{"id": "a", "type": "input"}, {"id": "b", "type": "output"}], "edges": []}
         assert validate(spec)
 
 
-# ---------------------------------------------------------- modelos ayudantes
+# ---------------------------------------------------------- helper models
 class TestProviders:
-    """El punto único de generación y el manejo de las claves."""
+    """The single generation entry point and key handling."""
 
-    def test_complete_sin_modelo_ni_ayudante_avisa(self, monkeypatch):
+    def test_complete_without_model_or_helper_warns(self, monkeypatch):
         from app.services import providers
         from app.services.inference import manager
         monkeypatch.setattr(manager, "current", None)
-        with pytest.raises(RuntimeError, match="ayudante"):
-            providers.complete(None, "hola")
+        with pytest.raises(RuntimeError, match="helper"):
+            providers.complete(None, "hello")
 
-    def test_ayudante_inexistente_es_explicito(self):
+    def test_missing_helper_is_explicit(self):
         from app.services import providers
-        with pytest.raises(RuntimeError, match="ya no existe"):
-            providers.complete(999999, "hola")
+        with pytest.raises(RuntimeError, match="no longer exists"):
+            providers.complete(999999, "hello")
 
-    def test_complete_json_rescata_json_envuelto(self, monkeypatch):
-        """Los modelos suelen devolver el JSON rodeado de texto; hay que sacarlo igual."""
+    def test_complete_json_rescues_wrapped_json(self, monkeypatch):
+        """Models often return the JSON wrapped in text; it has to be pulled out anyway."""
         from app.services import providers
-        monkeypatch.setattr(providers, "complete", lambda *a, **k: 'Claro:\n{"score": 4}\n¡Espero que sirva!')
+        monkeypatch.setattr(providers, "complete", lambda *a, **k: 'Sure:\n{"score": 4}\nHope it helps!')
         assert providers.complete_json(None, "…") == {"score": 4}
 
-    def test_complete_json_devuelve_none_si_no_hay_json(self, monkeypatch):
+    def test_complete_json_returns_none_without_json(self, monkeypatch):
         from app.services import providers
-        monkeypatch.setattr(providers, "complete", lambda *a, **k: "no tengo ni idea")
+        monkeypatch.setattr(providers, "complete", lambda *a, **k: "no idea at all")
         assert providers.complete_json(None, "…") is None
 
-    def test_las_claves_no_vuelven_enteras(self):
-        """El listado que ve la interfaz sólo puede llevar la clave enmascarada."""
+    def test_keys_never_go_back_whole(self):
+        """The list the interface sees may only carry the masked key."""
         from app.db import Provider, engine
         from app.services import providers
         from sqlmodel import Session
         with Session(engine) as s:
-            p = Provider(name="_test_mask", kind="openai", base_url="http://x/v1", api_key="sk-supersecreto1234")
+            p = Provider(name="_test_mask", kind="openai", base_url="http://x/v1", api_key="sk-supersecret1234")
             s.add(p)
             s.commit()
             pid = p.id
         try:
             row = next(r for r in providers.listing() if r["id"] == pid)
             assert row["api_key"] == "…1234"
-            assert "supersecreto" not in row["api_key"]
+            assert "supersecret" not in row["api_key"]
             assert row["has_key"] is True
         finally:
             with Session(engine) as s:
@@ -324,9 +324,9 @@ class TestProviders:
                 s.commit()
 
 
-# ------------------------------------------------------- limpieza de trabajos
+# ------------------------------------------------------- job cleanup
 class TestJobCleanup:
-    """Lo que nunca debe borrarse: trabajos en curso y archivos de un modelo registrado."""
+    """What must never be deleted: running jobs and the files of a registered model."""
 
     def _job(self, s, **kw):
         from app.db import Job
@@ -336,46 +336,46 @@ class TestJobCleanup:
         s.refresh(j)
         return j
 
-    def test_no_borra_trabajos_en_curso(self, tmp_path):
+    def test_doesnt_delete_running_jobs(self, tmp_path):
         from app.api.jobs import CleanupBody, cleanup
         from app.db import Job, Session, engine
         with Session(engine) as s:
-            vivo = self._job(s, name="_t_vivo", status="running")
-            muerto = self._job(s, name="_t_muerto", status="failed")
+            alive = self._job(s, name="_t_alive", status="running")
+            dead = self._job(s, name="_t_dead", status="failed")
             try:
                 ids = {j["id"] for j in cleanup(CleanupBody(dry_run=True), s)["jobs"]}
-                assert muerto.id in ids
-                assert vivo.id not in ids, "un trabajo en curso no puede entrar en la limpieza"
+                assert dead.id in ids
+                assert alive.id not in ids, "a running job can't be part of a cleanup"
             finally:
-                for j in (vivo, muerto):
+                for j in (alive, dead):
                     if (row := s.get(Job, j.id)):
                         s.delete(row)
                 s.commit()
 
-    def test_protege_los_archivos_de_un_modelo_registrado(self, tmp_path):
+    def test_protects_the_files_of_a_registered_model(self, tmp_path):
         from app.api.jobs import _delete_one, _output_info
         from app.db import Job, Model, Session, engine
-        out = tmp_path / "salida"
+        out = tmp_path / "output"
         out.mkdir()
         (out / "adapter.bin").write_bytes(b"x" * 1000)
         with Session(engine) as s:
             j = self._job(s, name="_t_prot", status="completed", config={"output_dir": str(out)})
-            m = Model(name="_t_modelo", kind="lora", path=str(out / "final"))
+            m = Model(name="_t_model", kind="lora", path=str(out / "final"))
             s.add(m)
             s.commit()
             try:
-                assert _output_info(s.get(Job, j.id), s)["models"] == ["_t_modelo"]
+                assert _output_info(s.get(Job, j.id), s)["models"] == ["_t_model"]
                 r = _delete_one(s.get(Job, j.id), s, delete_output=True)
                 s.commit()
                 assert r["kept_output"] is True
-                assert out.exists(), "no se pueden borrar archivos de los que depende un modelo"
+                assert out.exists(), "files a model depends on can't be deleted"
             finally:
                 with Session(engine) as s2:
                     if (row := s2.get(Model, m.id)):
                         s2.delete(row)
                     s2.commit()
 
-    def test_borra_los_archivos_cuando_nadie_depende(self, tmp_path):
+    def test_deletes_files_when_nothing_depends_on_them(self, tmp_path):
         from app.api.jobs import _delete_one
         from app.db import Job, Session, engine
         out = tmp_path / "huerfano"
@@ -389,41 +389,41 @@ class TestJobCleanup:
         assert not out.exists()
 
 
-# ------------------------------------------- métricas de evaluación y síntesis
+# ------------------------------------------- evaluation and synthesis metrics
 class TestEvaluationMetrics:
-    """Estas funciones producen los números con los que se decide qué modelo es mejor.
-    Un fallo aquí no se ve: sólo da una métrica algo distinta y la conclusión sale mal."""
+    """These functions produce the numbers you use to decide which model is better.
+    A bug here doesn't show: it just gives a slightly different metric and the conclusion comes out wrong."""
 
-    def test_strip_think_quita_el_razonamiento(self):
+    def test_strip_think_removes_the_reasoning(self):
         from app.services.evaluation import strip_think
-        assert strip_think("<think>dudo mucho</think>La respuesta es 42") == "La respuesta es 42"
-        assert strip_think("sin etiquetas") == "sin etiquetas"
+        assert strip_think("<think>I really doubt it</think>The answer is 42") == "The answer is 42"
+        assert strip_think("no tags") == "no tags"
 
-    def test_strip_think_con_bloque_sin_cerrar(self):
-        """Si el modelo se queda sin tokens dentro de <think>, no puede colarse el razonamiento como respuesta."""
+    def test_strip_think_with_an_unclosed_block(self):
+        """If the model runs out of tokens inside <think>, the reasoning can't sneak in as the answer."""
         from app.services.evaluation import strip_think
-        out = strip_think("<think>estaba pensando y me quedé sin")
-        assert "estaba pensando" not in out
+        out = strip_think("<think>I was thinking and ran out of")
+        assert "I was thinking" not in out
 
-    def test_strip_think_con_cierre_suelto(self):
-        """Qwen3.5 en GGUF abre el bloque desde la plantilla, así que sólo emite el cierre.
-        Sin esto, el razonamiento entero se colaba como si fuera la respuesta y contaminaba
-        todas las métricas, que es justo lo que las métricas no pueden permitirse."""
+    def test_strip_think_with_a_stray_closing_tag(self):
+        """Qwen3.5 in GGUF opens the block from the template, so it only emits the closing tag.
+        Without this, the whole reasoning sneaked in as if it were the answer and contaminated
+        every metric, which is exactly what metrics can't afford."""
         from app.services.evaluation import strip_think
-        crudo = "We need answer in Spanish. Two sentences. Good.\n</think>\n\nLoRA ajusta pocas matrices."
-        assert strip_think(crudo) == "LoRA ajusta pocas matrices."
+        raw = "We need to answer briefly. Two sentences. Good.\n</think>\n\nLoRA trains a few small matrices."
+        assert strip_think(raw) == "LoRA trains a few small matrices."
 
-    def test_palabras_clave(self):
+    def test_keywords(self):
         from app.services.evaluation import _contains
-        assert _contains("El plazo es de 30 días naturales", ["30", "días"]) == 1.0
-        assert _contains("El plazo es de 30 días", ["30", "meses"]) == 0.5
-        assert _contains("da igual", []) is None
+        assert _contains("The period is 30 calendar days", ["30", "days"]) == 1.0
+        assert _contains("The period is 30 days", ["30", "months"]) == 0.5
+        assert _contains("whatever", []) is None
 
-    def test_palabras_clave_ignora_mayusculas(self):
+    def test_keywords_ignore_case(self):
         from app.services.evaluation import _contains
-        assert _contains("MADRID es la capital", ["madrid"]) == 1.0
+        assert _contains("PARIS is the capital", ["paris"]) == 1.0
 
-    def test_resumen_promedia_por_variante_y_omite_ausentes(self):
+    def test_summary_averages_per_variant_and_skips_missing(self):
         from app.services.evaluation import summarize
         res = [
             {"variant": "m1 (RAG)", "model_name": "m1", "rag": True, "judge_score": 8, "similarity": 0.9},
@@ -432,107 +432,107 @@ class TestEvaluationMetrics:
         ]
         out = summarize(res)
         assert out["m1 (RAG)"]["judge_score"] == 7.0
-        # La segunda fila no tiene similitud: no debe contar como 0 y hundir la media
+        # The second row has no similarity: it mustn't count as 0 and drag the mean down
         assert out["m1 (RAG)"]["similarity"] == 0.9
         assert out["m1 (RAG)"]["n"] == 2
         assert out["m1"]["judge_score"] == 4.0
 
-    def test_calibracion_del_juez(self):
+    def test_judge_calibration(self):
         from app.services.evaluation import judge_agreement
-        # judge_score va de 1 a 10 y tus notas de 1 a 5: la función divide entre 2 antes de comparar
-        perfecto = [{"judge_score": n * 2, "rating": n} for n in (1, 2, 3, 4, 5)]
-        r = judge_agreement(perfecto)
+        # judge_score goes from 1 to 10 and your ratings from 1 to 5: the function halves it before comparing
+        perfect = [{"judge_score": n * 2, "rating": n} for n in (1, 2, 3, 4, 5)]
+        r = judge_agreement(perfect)
         assert r["spearman"] == 1.0 and r["mae"] == 0.0 and r["judge_bias"] == 0.0
 
-    def test_calibracion_detecta_juez_generoso(self):
+    def test_calibration_flags_a_generous_judge(self):
         from app.services.evaluation import judge_agreement
-        generoso = [{"judge_score": n * 2 + 2, "rating": n} for n in (1, 2, 3, 4)]
-        r = judge_agreement(generoso)
-        assert r["judge_bias"] == 1.0, "un juez que puntúa de más debe salir con sesgo positivo"
+        generous = [{"judge_score": n * 2 + 2, "rating": n} for n in (1, 2, 3, 4)]
+        r = judge_agreement(generous)
+        assert r["judge_bias"] == 1.0, "a judge that scores too high must show a positive bias"
 
-    def test_calibracion_sin_datos_suficientes(self):
+    def test_calibration_without_enough_data(self):
         from app.services.evaluation import judge_agreement
         assert judge_agreement([{"judge_score": 8, "rating": 4}])["spearman"] is None
 
 
 class TestSynth:
-    """Generación de datasets sintéticos: lo que se cuela aquí acaba entrenando un modelo."""
+    """Synthetic dataset generation: whatever slips through here ends up training a model."""
 
-    def test_extrae_pares_de_un_json_envuelto_en_texto(self):
+    def test_extracts_pairs_from_json_wrapped_in_text(self):
         from app.services.synth import _pairs
-        out = _pairs('Claro:\n[{"question": "¿Qué es X?", "answer": "Es Y"}]\n¡Listo!')
-        assert out == [{"question": "¿Qué es X?", "answer": "Es Y"}]
+        out = _pairs('Sure:\n[{"question": "What is X?", "answer": "It is Y"}]\nDone!')
+        assert out == [{"question": "What is X?", "answer": "It is Y"}]
 
-    def test_descarta_pares_incompletos(self):
+    def test_drops_incomplete_pairs(self):
         from app.services.synth import _pairs
-        out = _pairs('[{"question": "sin respuesta"}, {"answer": "sin pregunta"}, {"question": "a", "answer": "b"}]')
+        out = _pairs('[{"question": "no answer"}, {"answer": "no question"}, {"question": "a", "answer": "b"}]')
         assert out == [{"question": "a", "answer": "b"}]
 
-    def test_json_invalido_no_revienta(self):
+    def test_invalid_json_doesnt_blow_up(self):
         from app.services.synth import _pairs
-        assert _pairs("el modelo se fue por las ramas") == []
+        assert _pairs("the model went off on a tangent") == []
 
-    def test_dedupe_quita_preguntas_casi_iguales(self, monkeypatch):
-        """Va por CPU a propósito: en GPU el test fallaba o no según lo que hubiera cargado en ese
-        momento, y una prueba que depende de eso no prueba nada."""
+    def test_dedupe_removes_near_identical_questions(self, monkeypatch):
+        """It runs on the CPU on purpose: on the GPU the test passed or failed depending on what was loaded at
+        the time, and a test that depends on that proves nothing."""
         from app.services import rag as rag_svc
         monkeypatch.setattr(rag_svc, "_device", lambda: "cpu")
         rag_svc.unload_models()
         from app.services.synth import _dedupe
-        rows = [{"question": "¿Cuál es la capital de Francia?", "answer": "París"},
-                {"question": "¿Cuál es la capital de Francia?", "answer": "París"},
-                {"question": "¿Cuántos huesos tiene el cuerpo humano?", "answer": "206"}]
-        out, quitadas = _dedupe(rows, 0.92)
-        assert quitadas == 1 and len(out) == 2
+        rows = [{"question": "What is the capital of France?", "answer": "Paris"},
+                {"question": "What is the capital of France?", "answer": "Paris"},
+                {"question": "How many bones does the human body have?", "answer": "206"}]
+        out, removed = _dedupe(rows, 0.92)
+        assert removed == 1 and len(out) == 2
 
 
-class TestBorradoDeArchivos:
-    """La comprobación de «esta ruta es mía» tiene que sobrevivir a los enlaces simbólicos:
-    data/outputs apunta a otro disco, y compararla sin resolver hacía que no borrase nunca nada."""
+class TestFileDeletion:
+    """The “this path is mine” check has to survive symbolic links:
+    data/outputs points to another disk, and comparing it unresolved meant nothing was ever deleted."""
 
-    def test_borra_dentro_de_las_carpetas_gestionadas(self, tmp_path, monkeypatch):
+    def test_deletes_inside_the_managed_folders(self, tmp_path, monkeypatch):
         from app.api import models as api
         from app.config import settings
-        raiz = tmp_path / "data"
-        (raiz / "outputs" / "algo").mkdir(parents=True)
-        (raiz / "outputs" / "algo" / "peso.bin").write_bytes(b"x" * 100)
-        monkeypatch.setattr(settings, "data_dir", raiz)
-        assert api._borrar_si_es_nuestro(raiz / "outputs" / "algo") is True
-        assert not (raiz / "outputs" / "algo").exists()
+        root = tmp_path / "data"
+        (root / "outputs" / "something").mkdir(parents=True)
+        (root / "outputs" / "something" / "weights.bin").write_bytes(b"x" * 100)
+        monkeypatch.setattr(settings, "data_dir", root)
+        assert api._delete_if_ours(root / "outputs" / "something") is True
+        assert not (root / "outputs" / "something").exists()
 
-    def test_sigue_el_enlace_a_otro_disco(self, tmp_path, monkeypatch):
+    def test_follows_the_link_to_another_disk(self, tmp_path, monkeypatch):
         from app.api import models as api
         from app.config import settings
-        real = tmp_path / "otro_disco" / "outputs" / "modelo"
+        real = tmp_path / "other_disk" / "outputs" / "model"
         real.mkdir(parents=True)
-        (real / "peso.bin").write_bytes(b"x" * 100)
-        raiz = tmp_path / "data"
-        raiz.mkdir()
-        (raiz / "outputs").symlink_to(tmp_path / "otro_disco" / "outputs")
-        monkeypatch.setattr(settings, "data_dir", raiz)
-        # La ruta va por el enlace, como las que guarda la base de datos
-        assert api._borrar_si_es_nuestro(raiz / "outputs" / "modelo") is True
-        assert not real.exists(), "el enlace a otro disco debe seguirse, no ignorarse"
+        (real / "weights.bin").write_bytes(b"x" * 100)
+        root = tmp_path / "data"
+        root.mkdir()
+        (root / "outputs").symlink_to(tmp_path / "other_disk" / "outputs")
+        monkeypatch.setattr(settings, "data_dir", root)
+        # The path goes through the link, like the ones the database stores
+        assert api._delete_if_ours(root / "outputs" / "model") is True
+        assert not real.exists(), "the link to another disk must be followed, not ignored"
 
-    def test_se_niega_fuera_de_sus_carpetas(self, tmp_path, monkeypatch):
+    def test_refuses_outside_its_folders(self, tmp_path, monkeypatch):
         from app.api import models as api
         from app.config import settings
-        fuera = tmp_path / "ajeno"
-        fuera.mkdir()
-        (fuera / "importante.txt").write_text("no tocar")
+        outside = tmp_path / "foreign"
+        outside.mkdir()
+        (outside / "important.txt").write_text("don't touch")
         monkeypatch.setattr(settings, "data_dir", tmp_path / "data")
         (tmp_path / "data").mkdir()
-        assert api._borrar_si_es_nuestro(fuera) is False
-        assert (fuera / "importante.txt").exists()
+        assert api._delete_if_ours(outside) is False
+        assert (outside / "important.txt").exists()
 
 
 class TestPurgeOutputs:
-    """Borrar pesos conservando el historial: los gigas se van, las métricas se quedan."""
+    """Delete weights but keep the history: the gigabytes go, the metrics stay."""
 
-    def test_borra_los_pesos_pero_no_la_fila(self, tmp_path):
+    def test_deletes_the_weights_but_not_the_row(self, tmp_path):
         from app.api.jobs import PurgeBody, purge_outputs
         from app.db import Job, Session, engine
-        out = tmp_path / "salida"
+        out = tmp_path / "output"
         out.mkdir()
         (out / "adapter.bin").write_bytes(b"x" * 500_000)
         with Session(engine) as s:
@@ -546,22 +546,22 @@ class TestPurgeOutputs:
             try:
                 r = purge_outputs(PurgeBody(ids=[jid], dry_run=False), s)
                 assert r["count"] == 1
-                assert not out.exists(), "los pesos tenían que borrarse"
-                vuelto = s.get(Job, jid)
-                assert vuelto is not None, "la fila del trabajo NO puede desaparecer"
-                assert vuelto.result["train_loss"] == 0.42, "las métricas tienen que sobrevivir"
-                assert vuelto.config["outputs_purged"] is True
+                assert not out.exists(), "the weights had to be deleted"
+                back = s.get(Job, jid)
+                assert back is not None, "the job's row must NOT disappear"
+                assert back.result["train_loss"] == 0.42, "the metrics have to survive"
+                assert back.config["outputs_purged"] is True
             finally:
                 if (row := s.get(Job, jid)):
                     s.delete(row)
                     s.commit()
 
-    def test_dry_run_no_toca_nada(self, tmp_path):
+    def test_dry_run_touches_nothing(self, tmp_path):
         from app.api.jobs import PurgeBody, purge_outputs
         from app.db import Job, Session, engine
-        out = tmp_path / "salida"
+        out = tmp_path / "output"
         out.mkdir()
-        (out / "peso.bin").write_bytes(b"x" * 1000)
+        (out / "weights.bin").write_bytes(b"x" * 1000)
         with Session(engine) as s:
             j = Job(name="_t_dry", type="train", status="completed", config={"output_dir": str(out)})
             s.add(j)
@@ -575,119 +575,119 @@ class TestPurgeOutputs:
                 s.commit()
 
 
-class TestRegistroDeDescargas:
-    """Nombres al registrar un modelo descargado: dos descargas a la vez chocaban."""
+class TestDownloadRegistration:
+    """Names when registering a downloaded model: two downloads at once used to collide."""
 
-    def test_busca_el_primer_nombre_libre(self):
-        from app.api.models import _nombre_libre
+    def test_finds_the_first_free_name(self):
+        from app.api.models import _free_name
         from app.db import Model, Session, engine
-        creados = []
+        created = []
         with Session(engine) as s:
             try:
-                assert _nombre_libre(s, "_t_libre") == "_t_libre"
-                for esperado in ("_t_libre-2", "_t_libre-3"):
-                    m = Model(name=_nombre_libre(s, "_t_libre"), kind="hf", path=f"x{len(creados)}")
+                assert _free_name(s, "_t_free") == "_t_free"
+                for expected in ("_t_free-2", "_t_free-3"):
+                    m = Model(name=_free_name(s, "_t_free"), kind="hf", path=f"x{len(created)}")
                     s.add(m)
                     s.commit()
                     s.refresh(m)
-                    creados.append(m.id)
-                    assert _nombre_libre(s, "_t_libre") == esperado
+                    created.append(m.id)
+                    assert _free_name(s, "_t_free") == expected
             finally:
-                for i in creados:
+                for i in created:
                     if (row := s.get(Model, i)):
                         s.delete(row)
                 s.commit()
 
 
 class TestVisionGGUF:
-    """Un GGUF ve imágenes sólo si se le carga el mmproj y se traduce el formato de mensajes."""
+    """A GGUF only sees images if its mmproj is loaded and the message format is translated."""
 
-    def test_traduce_el_formato_de_imagen(self):
-        """llama.cpp espera image_url; con nuestro formato la imagen viajaba y el modelo
-        contestaba que no podía verla."""
-        from app.services.inference import _para_llamacpp
+    def test_translates_the_image_format(self):
+        """llama.cpp expects image_url; with our format the image travelled and the model
+        answered that it couldn't see it."""
+        from app.services.inference import _for_llamacpp
         msgs = [{"role": "user", "content": [
-            {"type": "text", "text": "¿qué ves?"},
+            {"type": "text", "text": "what do you see?"},
             {"type": "image", "url": "data:image/png;base64,AAA"}]}]
-        out = _para_llamacpp(msgs)[0]["content"]
-        assert out[0] == {"type": "text", "text": "¿qué ves?"}
+        out = _for_llamacpp(msgs)[0]["content"]
+        assert out[0] == {"type": "text", "text": "what do you see?"}
         assert out[1] == {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}
 
-    def test_sin_vision_las_imagenes_se_avisan(self):
+    def test_without_vision_images_are_flagged(self):
         from app.services.inference import _text_only
         msgs = [{"role": "user", "content": [
-            {"type": "text", "text": "mira"}, {"type": "image", "url": "x"}]}]
+            {"type": "text", "text": "look"}, {"type": "image", "url": "x"}]}]
         c = _text_only(msgs)[0]["content"]
-        assert "mira" in c and "no admite visión" in c
+        assert "look" in c and "doesn't support vision" in c
 
-    def test_solo_activa_vision_con_mmproj_al_lado(self, tmp_path):
+    def test_only_enables_vision_with_an_mmproj_next_to_it(self, tmp_path):
         from app.services.inference import manager
-        suelto = tmp_path / "gemma-4-algo.gguf"
-        suelto.write_bytes(b"x")
-        assert manager._vision_handler(str(suelto)) == (None, None), "sin mmproj no hay visión"
+        lone = tmp_path / "gemma-4-something.gguf"
+        lone.write_bytes(b"x")
+        assert manager._vision_handler(str(lone)) == (None, None), "no mmproj, no vision"
 
-    def test_no_adivina_el_manejador_de_una_familia_desconocida(self, tmp_path):
+    def test_doesnt_guess_the_handler_of_an_unknown_family(self, tmp_path):
         from app.services.inference import manager
         (tmp_path / "mmproj-F16.gguf").write_bytes(b"x")
-        raro = tmp_path / "modelo-inventado-7b.gguf"
-        raro.write_bytes(b"x")
-        assert manager._vision_handler(str(raro)) == (None, None)
+        odd = tmp_path / "made-up-model-7b.gguf"
+        odd.write_bytes(b"x")
+        assert manager._vision_handler(str(odd)) == (None, None)
 
 
-class TestPlantillasYContexto:
-    """Las plantillas de dataset y el aviso de contexto recortado."""
+class TestTemplatesAndContext:
+    """The dataset templates and the truncated-context warning."""
 
-    def test_las_plantillas_se_normalizan_al_formato_correcto(self):
-        """Si una plantilla no pasa por el normalizador, el dataset que crea no se puede entrenar."""
+    def test_templates_normalize_to_the_right_format(self):
+        """If a template doesn't go through the normalizer, the dataset it creates can't be trained."""
         from app.services import datasets as ds
-        from app.services.plantillas import PLANTILLAS
-        for key, t in PLANTILLAS.items():
-            fmt, filas = ds.normalize(t["filas"], t["formato"])
-            assert fmt == t["formato"], f"{key}: sale como {fmt} y dice ser {t['formato']}"
-            assert len(filas) == len(t["filas"]), f"{key}: se perdieron filas al normalizar"
+        from app.services.dataset_templates import TEMPLATES
+        for key, t in TEMPLATES.items():
+            fmt, rows = ds.normalize(t["filas"], t["formato"])
+            assert fmt == t["formato"], f"{key}: comes out as {fmt} but claims to be {t['formato']}"
+            assert len(rows) == len(t["filas"]), f"{key}: rows were lost while normalizing"
 
-    def test_cada_plantilla_dice_cuantos_ejemplos_y_por_que(self):
-        from app.services.plantillas import listado
-        for t in listado():
-            assert t["cuantos"] and t["consejo"], f"{t['key']} sin guía"
+    def test_each_template_says_how_many_examples_and_why(self):
+        from app.services.dataset_templates import listing
+        for t in listing():
+            assert t["cuantos"] and t["consejo"], f"{t['key']} has no guidance"
             assert t["metodo"] in ("sft", "dpo", "grpo")
 
-    def test_avisa_cuando_el_contexto_no_cabe(self, monkeypatch):
-        """Sin aviso, el modelo responde con la mitad de los fragmentos y parece que el RAG falló."""
+    def test_warns_when_the_context_doesnt_fit(self, monkeypatch):
+        """Without a warning, the model answers with half the chunks and it looks like RAG failed."""
         from app.services import rag
         from app.services.inference import Loaded, manager
         monkeypatch.setattr(manager, "current",
                             Loaded(1, "x", "gguf", "p", None, "q", "llama.cpp", n_ctx=2048))
-        assert rag.contexto_excedido("corto", "¿?") is None
-        aviso = rag.contexto_excedido("x" * 9000, "¿?")
-        assert aviso and "2048" in aviso
+        assert rag.context_overflow("short", "?") is None
+        warning = rag.context_overflow("x" * 9000, "?")
+        assert warning and "2048" in warning
 
-    def test_sin_modelo_cargado_no_avisa_de_nada(self, monkeypatch):
+    def test_no_warning_without_a_loaded_model(self, monkeypatch):
         from app.services import rag
         from app.services.inference import manager
         monkeypatch.setattr(manager, "current", None)
-        assert rag.contexto_excedido("x" * 99999) is None
+        assert rag.context_overflow("x" * 99999) is None
 
 
-class TestCopiasDeSeguridad:
-    """El módulo que protege lo irreemplazable no tenía ninguna prueba."""
+class TestBackups:
+    """The module that protects what can't be replaced had no tests."""
 
-    def test_crear_listar_y_podar(self, tmp_path, monkeypatch):
+    def test_create_list_and_prune(self, tmp_path, monkeypatch):
         from app.config import settings
         from app.services import backup
         monkeypatch.setattr(settings, "data_dir", tmp_path)
         monkeypatch.setattr(settings, "backup_keep", 2)
-        (tmp_path / "llmtrainer.db").write_bytes(b"base de datos falsa")
+        (tmp_path / "llmtrainer.db").write_bytes(b"fake database")
         (tmp_path / "datasets").mkdir()
         (tmp_path / "datasets" / "a.jsonl").write_text('{"x": 1}')
 
         for _ in range(3):
-            backup.create(note="prueba")
-        # backup_keep=2: la más vieja tiene que haberse ido sola
-        assert len(backup.listing()) == 2, "prune no respetó el límite"
-        assert all(b["note"] == "prueba" for b in backup.listing())
+            backup.create(note="test")
+        # backup_keep=2: the oldest one has to have gone by itself
+        assert len(backup.listing()) == 2, "prune didn't respect the limit"
+        assert all(b["note"] == "test" for b in backup.listing())
 
-    def test_la_copia_lleva_lo_que_dice_llevar(self, tmp_path, monkeypatch):
+    def test_the_backup_holds_what_it_says(self, tmp_path, monkeypatch):
         import tarfile
         from app.config import settings
         from app.services import backup
@@ -695,28 +695,28 @@ class TestCopiasDeSeguridad:
         (tmp_path / "llmtrainer.db").write_bytes(b"x")
         (tmp_path / "rag").mkdir()
         (tmp_path / "rag" / "chroma.sqlite3").write_bytes(b"y")
-        # Los pesos NO deben entrar: son enormes y se pueden volver a generar
+        # Weights must NOT go in: they're huge and can be regenerated
         (tmp_path / "outputs").mkdir()
-        (tmp_path / "outputs" / "modelo.bin").write_bytes(b"z" * 1000)
+        (tmp_path / "outputs" / "model.bin").write_bytes(b"z" * 1000)
 
         info = backup.create()
         with tarfile.open(backup.backups_dir() / info["file"]) as t:
-            dentro = t.getnames()
-        assert any("llmtrainer.db" in n for n in dentro)
-        assert any("rag" in n for n in dentro)
-        assert not any("outputs" in n for n in dentro), "los pesos no pueden entrar en la copia"
+            inside = t.getnames()
+        assert any("llmtrainer.db" in n for n in inside)
+        assert any("rag" in n for n in inside)
+        assert not any("outputs" in n for n in inside), "weights can't go into the backup"
 
-    def test_verificar_detecta_un_archivo_roto(self, tmp_path, monkeypatch):
+    def test_verify_detects_a_broken_file(self, tmp_path, monkeypatch):
         from app.config import settings
         from app.services import backup
         monkeypatch.setattr(settings, "data_dir", tmp_path)
-        roto = backup.backups_dir() / "backup-20260101-000000.tar.gz"
-        roto.write_bytes(b"esto no es un tar.gz")
-        r = backup.verify(roto.name)
-        assert r["ok"] is False and "dañado" in r["error"]
+        broken = backup.backups_dir() / "backup-20260101-000000.tar.gz"
+        broken.write_bytes(b"this isn't a tar.gz")
+        r = backup.verify(broken.name)
+        assert r["ok"] is False and "damaged" in r["error"]
 
-    def test_verificar_avisa_de_tablas_que_faltan(self, tmp_path, monkeypatch):
-        """Una copia vieja no tiene las tablas nuevas: restaurarla te devuelve a antes de tenerlas."""
+    def test_verify_flags_missing_tables(self, tmp_path, monkeypatch):
+        """An old backup doesn't have the new tables: restoring it takes you back to before they existed."""
         import sqlite3
         from app.config import settings
         from app.services import backup
@@ -728,303 +728,303 @@ class TestCopiasDeSeguridad:
         info = backup.create()
         r = backup.verify(info["file"])
         assert r["ok"] is True
-        assert "questionset" in r["missing_tables"], "debería avisar de las tablas ausentes"
+        assert "questionset" in r["missing_tables"], "it should flag the missing tables"
         assert r["rows"]["dataset"] == 0
 
 
-class TestTareas:
-    """El registro de tareas en segundo plano: progreso, resultado, error y cancelación."""
+class TestTasks:
+    """The background task registry: progress, result, error and cancellation."""
 
-    def test_una_tarea_que_va_bien(self):
+    def test_a_task_that_succeeds(self):
         from app.services import tasks
-        t = tasks.submit("test", "suma", lambda task: 2 + 2)
+        t = tasks.submit("test", "sum", lambda task: 2 + 2)
         for _ in range(100):
             if t.status != "running":
                 break
             time.sleep(0.05)
         assert t.status == "completed" and t.result == 4 and t.progress == 1.0
 
-    def test_una_tarea_que_falla_guarda_el_error(self):
+    def test_a_failing_task_keeps_the_error(self):
         from app.services import tasks
 
-        def revienta(task):
-            raise ValueError("se rompió a propósito")
+        def blows_up(task):
+            raise ValueError("broken on purpose")
 
-        t = tasks.submit("test", "falla", revienta)
+        t = tasks.submit("test", "fails", blows_up)
         for _ in range(100):
             if t.status != "running":
                 break
             time.sleep(0.05)
-        assert t.status == "failed" and "se rompió a propósito" in t.error
+        assert t.status == "failed" and "broken on purpose" in t.error
 
-    def test_la_cancelacion_se_ve_desde_dentro(self):
-        """La bandera es lo único que tiene el trabajo para enterarse: si no llega, no se puede parar."""
+    def test_cancellation_is_visible_from_inside(self):
+        """The flag is all the work has to find out: if it doesn't arrive, it can't stop."""
         from app.services import tasks
-        visto = []
+        seen = []
 
-        def largo(task):
+        def long_task(task):
             for _ in range(200):
                 if task.cancel_requested:
-                    visto.append(True)
-                    return "cancelado"
+                    seen.append(True)
+                    return "cancelled"
                 time.sleep(0.02)
-            return "terminó entero"
+            return "finished whole"
 
-        t = tasks.submit("test", "largo", largo)
+        t = tasks.submit("test", "long", long_task)
         time.sleep(0.1)
         tasks.cancel(t.id)
         for _ in range(100):
             if t.status != "running":
                 break
             time.sleep(0.05)
-        assert visto == [True] and t.result == "cancelado"
+        assert seen == [True] and t.result == "cancelled"
 
 
 class TestVllm:
-    """vLLM vive en otro entorno y se habla por HTTP: lo que se puede probar sin GPU es el contrato."""
+    """vLLM lives in another environment and is talked to over HTTP: what can be tested without a GPU is the contract."""
 
-    def test_sabe_si_esta_instalado(self):
+    def test_knows_whether_it_is_installed(self):
         from app.services import vllm_engine
         assert isinstance(vllm_engine.available(), bool)
 
-    def test_el_cuerpo_de_la_peticion_respeta_los_parametros(self):
+    def test_the_request_body_respects_the_parameters(self):
         from app.services.inference import GenParams
         from app.services.vllm_engine import VllmServer
         s = VllmServer.__new__(VllmServer)
         s.served_name = "base"
         p = GenParams(max_new_tokens=128, temperature=0.4, top_p=0.8, top_k=20, seed=7, enable_thinking=False)
-        body = VllmServer._payload(s, [{"role": "user", "content": "hola"}], p, stream=True, template_kwargs=None)
+        body = VllmServer._payload(s, [{"role": "user", "content": "hi"}], p, stream=True, template_kwargs=None)
         assert body["max_tokens"] == 128 and body["temperature"] == 0.4 and body["seed"] == 7
         assert body["stream"] is True
-        # enable_thinking viaja como argumento de la plantilla, no como parámetro suelto
+        # enable_thinking travels as a template argument, not as a standalone parameter
         assert body["chat_template_kwargs"]["enable_thinking"] is False
 
-    def test_las_herramientas_viajan_en_formato_openai(self):
+    def test_tools_travel_in_openai_format(self):
         from app.services.inference import GenParams
         from app.services.vllm_engine import VllmServer
         s = VllmServer.__new__(VllmServer)
         s.served_name = "lora"
-        esquema = {"name": "buscar", "description": "…", "parameters": {}}
+        schema = {"name": "search", "description": "…", "parameters": {}}
         body = VllmServer._payload(s, [{"role": "user", "content": "x"}], GenParams(),
-                                   stream=False, template_kwargs={"tools": [esquema]})
-        assert body["tools"] == [{"type": "function", "function": esquema}]
+                                   stream=False, template_kwargs={"tools": [schema]})
+        assert body["tools"] == [{"type": "function", "function": schema}]
 
 
-class TestMcpCliente:
-    """El cliente MCP estaba roto desde que la librería pasó a 2.x y nadie lo vio."""
+class TestMcpClient:
+    """The MCP client was broken since the library moved to 2.x and nobody noticed."""
 
-    def test_saca_el_error_real_de_dentro_del_taskgroup(self):
+    def test_digs_the_real_error_out_of_the_taskgroup(self):
         from app.services.tools import error_real
         try:
-            raise BaseExceptionGroup("unhandled errors in a TaskGroup", [FileNotFoundError("npx no existe")])
+            raise BaseExceptionGroup("unhandled errors in a TaskGroup", [FileNotFoundError("npx doesn't exist")])
         except BaseExceptionGroup as e:
-            assert error_real(e) == "FileNotFoundError: npx no existe"
+            assert error_real(e) == "FileNotFoundError: npx doesn't exist"
 
-    def test_url_suelta_se_trata_como_http(self):
+    def test_a_standalone_url_is_treated_as_http(self):
         from app.services.tools import _mcp_server
         assert _mcp_server("http://x/mcp/") == {"transport": "http", "url": "http://x/mcp/"}
 
-    def test_servidor_inexistente_es_explicito(self):
+    def test_a_missing_server_is_explicit(self):
         from app.services.tools import _mcp_server
-        with pytest.raises(RuntimeError, match="ya no existe"):
+        with pytest.raises(RuntimeError, match="no longer exists"):
             _mcp_server(999999)
 
-    def test_las_claves_no_vuelven_enteras(self):
+    def test_keys_never_go_back_whole(self):
         from app.api.connections import _mask
-        assert _mask({"GITHUB_TOKEN": "ghp_supersecreto9876"}) == {"GITHUB_TOKEN": "…9876"}
+        assert _mask({"GITHUB_TOKEN": "ghp_supersecret9876"}) == {"GITHUB_TOKEN": "…9876"}
 
 
-class TestDisparadores:
-    """Lo que abre la app al exterior: quién puede lanzar qué, y cuándo."""
+class TestTriggers:
+    """What opens the app to the outside: who can run what, and when."""
 
-    def _bot(self, permitidos):
+    def _bot(self, allowed):
         from app.db import Trigger
         return Trigger(id=1, name="bot", kind="telegram", target_kind="flow", target_id=1,
-                       config={"bot_token": "x", "allowed_chat_ids": permitidos})
+                       config={"bot_token": "x", "allowed_chat_ids": allowed})
 
-    def _msg(self, chat, texto="hola"):
-        return {"update_id": 1, "message": {"chat": {"id": chat}, "text": texto}}
+    def _msg(self, chat, text="hello"):
+        return {"update_id": 1, "message": {"chat": {"id": chat}, "text": text}}
 
-    def test_sin_lista_no_ejecuta_nada_y_dice_el_chat_id(self, monkeypatch):
+    def test_without_a_list_nothing_runs_and_it_tells_the_chat_id(self, monkeypatch):
         from app.services import triggers as tr
-        ejecutado = []
-        monkeypatch.setattr(tr, "ejecutar", lambda *a, **k: ejecutado.append(1) or {"estado": "ok", "salida": "x"})
-        enviados = []
-        tr.procesar_update(self._bot([]), self._msg(555), lambda m, **d: enviados.append((m, d)))
-        assert not ejecutado, "un bot sin lista de permitidos no puede ejecutar nada"
-        assert "555" in enviados[0][1]["text"], "debe decirle su chat_id para poder añadirlo"
+        ran = []
+        monkeypatch.setattr(tr, "execute", lambda *a, **k: ran.append(1) or {"estado": "ok", "salida": "x"})
+        sent = []
+        tr.handle_update(self._bot([]), self._msg(555), lambda m, **d: sent.append((m, d)))
+        assert not ran, "a bot without an allowlist can't run anything"
+        assert "555" in sent[0][1]["text"], "it has to tell them their chat_id so it can be added"
 
-    def test_un_desconocido_se_ignora_en_silencio(self, monkeypatch):
+    def test_a_stranger_is_silently_ignored(self, monkeypatch):
         from app.services import triggers as tr
-        monkeypatch.setattr(tr, "ejecutar", lambda *a, **k: pytest.fail("no debía ejecutarse"))
-        enviados = []
-        tr.procesar_update(self._bot([111]), self._msg(999), lambda m, **d: enviados.append(m))
-        assert enviados == [], "a un chat ajeno no se le contesta: ni siquiera confirma que el bot existe"
+        monkeypatch.setattr(tr, "execute", lambda *a, **k: pytest.fail("it shouldn't have run"))
+        sent = []
+        tr.handle_update(self._bot([111]), self._msg(999), lambda m, **d: sent.append(m))
+        assert sent == [], "a foreign chat gets no reply: not even confirmation that the bot exists"
 
-    def test_un_chat_permitido_ejecuta_y_recibe_la_respuesta(self, monkeypatch):
+    def test_an_allowed_chat_runs_and_gets_the_answer(self, monkeypatch):
         from app.services import triggers as tr
-        monkeypatch.setattr(tr, "ejecutar", lambda t, texto, o: {"estado": "ok", "salida": f"eco: {texto}"})
-        enviados = []
-        tr.procesar_update(self._bot([111]), self._msg(111, "hola"), lambda m, **d: enviados.append((m, d)))
-        textos = [d["text"] for m, d in enviados if m == "sendMessage"]
-        assert textos == ["eco: hola"]
+        monkeypatch.setattr(tr, "execute", lambda t, text, o: {"estado": "ok", "salida": f"echo: {text}"})
+        sent = []
+        tr.handle_update(self._bot([111]), self._msg(111, "hello"), lambda m, **d: sent.append((m, d)))
+        texts = [d["text"] for m, d in sent if m == "sendMessage"]
+        assert texts == ["echo: hello"]
 
-    def test_una_aprobacion_llega_con_botones_y_se_reanuda(self, monkeypatch):
+    def test_an_approval_arrives_with_buttons_and_resumes(self, monkeypatch):
         from app.services import triggers as tr
-        monkeypatch.setattr(tr, "ejecutar", lambda t, texto, o: {
-            "estado": "espera", "salida": {"message": "¿Guardo?", "preview": "borrador"}, "thread_id": "th1", "flow_id": 7})
-        enviados = []
+        monkeypatch.setattr(tr, "execute", lambda t, text, o: {
+            "estado": "waiting", "salida": {"message": "Save it?", "preview": "draft"}, "thread_id": "th1", "flow_id": 7})
+        sent = []
         bot = self._bot([111])
-        tr.procesar_update(bot, self._msg(111, "redacta"), lambda m, **d: enviados.append((m, d)))
-        teclado = [d for m, d in enviados if m == "sendMessage" and "reply_markup" in d][0]
-        botones = teclado["reply_markup"]["inline_keyboard"][0]
-        ok = botones[0]["callback_data"]
-        assert ok.startswith("ok:") and botones[1]["callback_data"].startswith("no:")
+        tr.handle_update(bot, self._msg(111, "write it"), lambda m, **d: sent.append((m, d)))
+        keyboard = [d for m, d in sent if m == "sendMessage" and "reply_markup" in d][0]
+        buttons = keyboard["reply_markup"]["inline_keyboard"][0]
+        ok = buttons[0]["callback_data"]
+        assert ok.startswith("ok:") and buttons[1]["callback_data"].startswith("no:")
 
-        reanudado = {}
-        monkeypatch.setattr(tr, "_correr_flujo", lambda fid, texto, thread_id=None, resume=None:
-                            reanudado.update(fid=fid, thread=thread_id, resume=resume) or {"estado": "ok", "salida": "guardado"})
+        resumed = {}
+        monkeypatch.setattr(tr, "_run_flow", lambda fid, text, thread_id=None, resume=None:
+                            resumed.update(fid=fid, thread=thread_id, resume=resume) or {"estado": "ok", "salida": "saved"})
         cq = {"update_id": 2, "callback_query": {"id": "c1", "data": ok, "message": {"chat": {"id": 111}}}}
-        tr.procesar_update(bot, cq, lambda m, **d: enviados.append((m, d)))
-        assert reanudado == {"fid": 7, "thread": "th1", "resume": {"rejected": False, "comment": "desde Telegram", "edited": None}}
+        tr.handle_update(bot, cq, lambda m, **d: sent.append((m, d)))
+        assert resumed == {"fid": 7, "thread": "th1", "resume": {"rejected": False, "comment": "from Telegram", "edited": None}}
 
-    def test_el_boton_de_un_chat_ajeno_no_reanuda(self, monkeypatch):
+    def test_a_foreign_chats_button_doesnt_resume(self, monkeypatch):
         from app.services import triggers as tr
-        monkeypatch.setattr(tr, "_correr_flujo", lambda *a, **k: pytest.fail("no debía reanudar"))
-        tr._pendientes["k1"] = {"flow_id": 1, "thread_id": "t", "texto": "x"}
+        monkeypatch.setattr(tr, "_run_flow", lambda *a, **k: pytest.fail("it shouldn't have resumed"))
+        tr._pending["k1"] = {"flow_id": 1, "thread_id": "t", "texto": "x"}
         cq = {"update_id": 3, "callback_query": {"id": "c", "data": "ok:k1", "message": {"chat": {"id": 999}}}}
-        tr.procesar_update(self._bot([111]), cq, lambda m, **d: None)
-        assert "k1" in tr._pendientes, "la aprobación sigue pendiente para su dueño"
-        tr._pendientes.pop("k1")
+        tr.handle_update(self._bot([111]), cq, lambda m, **d: None)
+        assert "k1" in tr._pending, "the approval stays pending for its owner"
+        tr._pending.pop("k1")
 
-    def test_cuando_toca_un_programado(self):
+    def test_when_a_schedule_is_due(self):
         from datetime import datetime
-        from app.services.triggers import toca
+        from app.services.triggers import is_due
         a = datetime(2026, 9, 24, 8, 30)
-        assert toca({"cada_min": 60}, None, a)
-        assert not toca({"cada_min": 60}, datetime(2026, 9, 24, 8, 0), a)
-        assert toca({"cada_min": 60}, datetime(2026, 9, 24, 7, 29), a)
-        assert toca({"diario": "08:00"}, datetime(2026, 9, 23, 8, 0), a), "hoy aún no había corrido"
-        assert not toca({"diario": "08:00"}, datetime(2026, 9, 24, 8, 1), a), "ya corrió hoy"
-        assert not toca({"diario": "09:00"}, None, a), "todavía no es la hora"
+        assert is_due({"cada_min": 60}, None, a)
+        assert not is_due({"cada_min": 60}, datetime(2026, 9, 24, 8, 0), a)
+        assert is_due({"cada_min": 60}, datetime(2026, 9, 24, 7, 29), a)
+        assert is_due({"diario": "08:00"}, datetime(2026, 9, 23, 8, 0), a), "it hadn't run today yet"
+        assert not is_due({"diario": "08:00"}, datetime(2026, 9, 24, 8, 1), a), "it already ran today"
+        assert not is_due({"diario": "09:00"}, None, a), "it isn't time yet"
 
-    def test_un_token_equivocado_no_encuentra_nada(self):
-        from app.services.triggers import buscar_webhook
-        assert buscar_webhook("token-que-no-existe") is None
+    def test_a_wrong_token_finds_nothing(self):
+        from app.services.triggers import find_webhook
+        assert find_webhook("token-that-doesnt-exist") is None
 
 
-class TestEvaluacionDeAgentes:
-    """Cómo se decide si un agente acertó con la herramienta."""
+class TestAgentEvaluation:
+    """How it's decided whether an agent picked the right tool."""
 
-    ALIAS = {"calcular": {"calcular", "calculator", "calculadora"},
-             "buscar_documentos": {"buscar_documentos", "rag_search", "buscar en mis documentos (rag)"}}
+    ALIAS = {"calculate": {"calculate", "calculator"},
+             "search_documents": {"search_documents", "rag_search", "search my documents (rag)"}}
 
-    def test_el_id_del_catalogo_cuenta_aunque_el_modelo_vea_otro_nombre(self):
-        """El modelo llama «calcular» y el caso dice «calculator»: eso es un acierto.
-        Sin traducir nombres, la primera evaluación real dio 17% cuando era 67%."""
-        from app.services.agent_eval import _coincide
-        assert _coincide("calculator", ["calcular"], self.ALIAS)
-        assert _coincide("rag_search", ["buscar_documentos"], self.ALIAS)
-        assert not _coincide("calculator", ["buscar_documentos"], self.ALIAS)
+    def test_the_catalog_id_counts_even_if_the_model_sees_another_name(self):
+        """The model calls “calculate” and the case says “calculator”: that's a hit.
+        Without translating names, the first real evaluation gave 17% when it was 67%."""
+        from app.services.agent_eval import _matches
+        assert _matches("calculator", ["calculate"], self.ALIAS)
+        assert _matches("rag_search", ["search_documents"], self.ALIAS)
+        assert not _matches("calculator", ["search_documents"], self.ALIAS)
 
-    def test_ninguna_significa_no_usar_herramientas(self, monkeypatch):
+    def test_none_means_no_tools(self, monkeypatch):
         from app.services import agent_eval
-        monkeypatch.setattr(agent_eval, "run_agent", lambda a, m: iter([{"type": "done", "final": "¡Hola!", "steps": 1}]))
-        r = agent_eval.evaluar_caso({}, {"question": "hola", "tool": "ninguna"}, alias={})
+        monkeypatch.setattr(agent_eval, "run_agent", lambda a, m: iter([{"type": "done", "final": "Hi!", "steps": 1}]))
+        r = agent_eval.evaluate_case({}, {"question": "hi", "tool": "none"}, alias={})
         assert r["acierto"] and r["a_la_primera"]
 
-    def test_acertar_tras_fallar_no_es_a_la_primera(self, monkeypatch):
+    def test_getting_it_right_after_failing_isnt_first_try(self, monkeypatch):
         from app.services import agent_eval
-        eventos = [{"type": "tool_call", "name": "buscar_documentos"}, {"type": "tool_call", "name": "calcular"},
+        events = [{"type": "tool_call", "name": "search_documents"}, {"type": "tool_call", "name": "calculate"},
                    {"type": "done", "final": "69104", "steps": 3}]
-        monkeypatch.setattr(agent_eval, "run_agent", lambda a, m: iter(eventos))
-        r = agent_eval.evaluar_caso({}, {"question": "1234*56", "tool": "calculator", "keywords": ["69104"]}, alias=self.ALIAS)
+        monkeypatch.setattr(agent_eval, "run_agent", lambda a, m: iter(events))
+        r = agent_eval.evaluate_case({}, {"question": "1234*56", "tool": "calculator", "keywords": ["69104"]}, alias=self.ALIAS)
         assert r["acierto"] and not r["a_la_primera"] and r["claves"] == 1.0
 
-    def test_el_resumen_agrupa_los_fallos(self):
-        from app.services.agent_eval import resumir
-        filas = [{"acierto": False, "a_la_primera": False, "esperada": "rag_search", "llamadas": [], "claves": None,
+    def test_the_summary_groups_the_failures(self):
+        from app.services.agent_eval import summarize
+        rows = [{"acierto": False, "a_la_primera": False, "esperada": "rag_search", "llamadas": [], "claves": None,
                   "pasos": 1, "segundos": 1.0, "error": None}] * 2 + \
-                [{"acierto": True, "a_la_primera": True, "esperada": "calculator", "llamadas": ["calcular"], "claves": 1.0,
+                [{"acierto": True, "a_la_primera": True, "esperada": "calculator", "llamadas": ["calculate"], "claves": 1.0,
                   "pasos": 2, "segundos": 1.0, "error": None}]
-        s = resumir(filas)
+        s = summarize(rows)
         assert s["herramienta_correcta"] == 0.33
-        assert s["fallos_frecuentes"][0] == ("esperaba rag_search, usó ninguna", 2)
+        assert s["fallos_frecuentes"][0] == ("expected rag_search, used none", 2)
 
 
-class TestFormatosDeLlamada:
-    """Cada familia de modelos escribe las llamadas a herramientas a su manera."""
+class TestCallFormats:
+    """Each model family writes tool calls its own way."""
 
-    def test_reconoce_el_formato_nativo_de_gemma4(self):
+    def test_recognizes_gemma4_native_format(self):
         from app.services.agents import parse_calls, visible_text
-        crudo = ('<|channel>thought\n<channel|><|tool_call>call:mcp_list_directory'
-                 '{"path": "/tmp/carpeta"}<tool_call|>')
-        assert parse_calls(crudo) == [{"name": "mcp_list_directory", "arguments": {"path": "/tmp/carpeta"}}]
-        assert visible_text(crudo) == "", "ni el canal de pensamiento ni la llamada pueden llegar al usuario"
+        raw = ('<|channel>thought\n<channel|><|tool_call>call:mcp_list_directory'
+                 '{"path": "/tmp/folder"}<tool_call|>')
+        assert parse_calls(raw) == [{"name": "mcp_list_directory", "arguments": {"path": "/tmp/folder"}}]
+        assert visible_text(raw) == "", "neither the thinking channel nor the call may reach the user"
 
-    def test_gemma4_con_claves_sin_comillas(self):
+    def test_gemma4_with_unquoted_keys(self):
         from app.services.agents import parse_calls
-        crudo = '<|channel>thought\n<channel|><|tool_call>call:mcp_open_nodes{names:["Usuario"]}<tool_call|>'
-        assert parse_calls(crudo) == [{"name": "mcp_open_nodes", "arguments": {"names": ["Usuario"]}}]
-        crudo = '<|tool_call>call:buscar{query:<|"|>precio: litio, hoy<|"|>,k:3}<tool_call|>'
-        assert parse_calls(crudo) == [{"name": "buscar", "arguments": {"query": "precio: litio, hoy", "k": 3}}]
-        # A veces con dos puntos entre el nombre y los argumentos
-        crudo = '<|tool_call>call:mcp_arxiv_search:{"max_results":5,"query":"GRPO"}<tool_call|>'
-        assert parse_calls(crudo) == [{"name": "mcp_arxiv_search", "arguments": {"max_results": 5, "query": "GRPO"}}]
+        raw = '<|channel>thought\n<channel|><|tool_call>call:mcp_open_nodes{names:["User"]}<tool_call|>'
+        assert parse_calls(raw) == [{"name": "mcp_open_nodes", "arguments": {"names": ["User"]}}]
+        raw = '<|tool_call>call:search{query:<|"|>price: lithium, today<|"|>,k:3}<tool_call|>'
+        assert parse_calls(raw) == [{"name": "search", "arguments": {"query": "price: lithium, today", "k": 3}}]
+        # Sometimes with a colon between the name and the arguments
+        raw = '<|tool_call>call:mcp_arxiv_search:{"max_results":5,"query":"GRPO"}<tool_call|>'
+        assert parse_calls(raw) == [{"name": "mcp_arxiv_search", "arguments": {"max_results": 5, "query": "GRPO"}}]
 
-    def test_reconoce_la_llamada_con_atributos(self):
+    def test_recognizes_the_call_with_attributes(self):
         from app.services.agents import parse_calls, visible_text
-        crudo = """<tool_call name="mcp_open_nodes" arguments='{"names": ["Usuario"]}'></tool_call>"""
-        assert parse_calls(crudo) == [{"name": "mcp_open_nodes", "arguments": {"names": ["Usuario"]}}]
-        assert visible_text(crudo) == ""
+        raw = """<tool_call name="mcp_open_nodes" arguments='{"names": ["User"]}'></tool_call>"""
+        assert parse_calls(raw) == [{"name": "mcp_open_nodes", "arguments": {"names": ["User"]}}]
+        assert visible_text(raw) == ""
 
-    def test_sigue_reconociendo_el_formato_de_siempre(self):
+    def test_still_recognizes_the_usual_format(self):
         from app.services.agents import parse_calls
-        assert parse_calls('<tool_call>{"name": "calcular", "arguments": {"expr": "2+2"}}</tool_call>') == \
-            [{"name": "calcular", "arguments": {"expr": "2+2"}}]
+        assert parse_calls('<tool_call>{"name": "calculate", "arguments": {"expr": "2+2"}}</tool_call>') == \
+            [{"name": "calculate", "arguments": {"expr": "2+2"}}]
 
-    def test_strip_think_quita_el_canal_de_gemma(self):
+    def test_strip_think_removes_gemmas_channel(self):
         from app.services.evaluation import strip_think
-        assert strip_think("<|channel>thought\nvoy a pensar<channel|>La respuesta es 4") == "La respuesta es 4"
+        assert strip_think("<|channel>thought\nlet me think<channel|>The answer is 4") == "The answer is 4"
 
 
-class TestMcpConectado:
-    """Los MCP externos sirven si están enchufados a algo: a un nodo de flujo o a un agente que guarda aquí."""
+class TestConnectedMcp:
+    """External MCPs are useful when they're plugged into something: a flow node or an agent that saves here."""
 
-    def test_los_argumentos_de_un_nodo_llegan_con_su_tipo(self):
-        assert T._tipar({"limit": "5", "q": "hola", "tipos": '["dataset"]', "ok": "true", "id": "2106.09685x"}) == \
-            {"limit": 5, "q": "hola", "tipos": ["dataset"], "ok": True, "id": "2106.09685x"}
+    def test_a_nodes_arguments_arrive_with_their_type(self):
+        assert T._typed({"limit": "5", "q": "hello", "types": '["dataset"]', "ok": "true", "id": "2106.09685x"}) == \
+            {"limit": 5, "q": "hello", "types": ["dataset"], "ok": True, "id": "2106.09685x"}
 
-    def test_un_nodo_mcp_sin_herramienta_explica_que_falta(self):
-        texto, _ = T.execute({"run": T.TOOLS["mcp"]["run"], "config": {"server_id": 1}}, {})
-        assert "Elige el servidor MCP y la herramienta" in texto
+    def test_an_mcp_node_without_a_tool_explains_whats_missing(self):
+        text, _ = T.execute({"run": T.TOOLS["mcp"]["run"], "config": {"server_id": 1}}, {})
+        assert "Choose the MCP server and the tool" in text
 
-    def test_el_flujo_avisa_del_nodo_mcp_a_medio_configurar(self):
+    def test_the_flow_warns_about_a_half_configured_mcp_node(self):
         from app.services.flows import validate
         spec = {"nodes": [{"id": "a", "type": "tool", "label": "HF", "config": {"tool_id": "mcp", "config": {"server_id": 1}}}],
                 "edges": []}
-        assert any("servidor MCP" in w for w in validate(spec))
+        assert any("MCP server" in w for w in validate(spec))
 
-    def test_las_recetas_sólo_usan_servidores_que_sabemos_registrar(self):
-        from app.api.connections import CATALOGO, PROPIO, RECETAS
-        conocidos = {c["key"] for c in CATALOGO} | {PROPIO}
-        for r in RECETAS:
-            assert set(r["usa"]) <= conocidos, r["key"]
-            assert all(r["usa"].values()), "cada servidor con su lista corta de herramientas"
+    def test_recipes_only_use_servers_we_know_how_to_register(self):
+        from app.api.connections import CATALOG, OWN, RECIPES
+        known = {c["key"] for c in CATALOG} | {OWN}
+        for r in RECIPES:
+            assert set(r["usa"]) <= known, r["key"]
+            assert all(r["usa"].values()), "each server with its short list of tools"
 
-    def test_ingest_file_no_sale_de_la_carpeta_de_entrada(self, monkeypatch):
+    def test_ingest_file_doesnt_leave_the_inbox_folder(self, monkeypatch):
         import anyio
         from mcp.server.mcpserver.exceptions import ToolError
 
         from app.api import mcp_server
         from app.db import RagCollection
         monkeypatch.setattr(mcp_server, "_collection", lambda name: RagCollection(id=1, name=name, embed_model="x"))
-        with pytest.raises(ToolError, match="data/entrada"):
+        with pytest.raises(ToolError, match="data/inbox"):
             anyio.run(mcp_server.ingest_file, "c", "../llmtrainer.db")
 
 
-    def test_el_json_de_un_nodo_mcp_se_puede_usar_por_campos(self):
+    def test_an_mcp_nodes_json_can_be_used_by_field(self):
         from app.services.flows import render
-        assert render("{t_json[text]}", {"t_json": {"text": "hola"}}) == "hola"
-        # Si el campo no existe no revienta el flujo: queda la plantilla tal cual
+        assert render("{t_json[text]}", {"t_json": {"text": "hello"}}) == "hello"
+        # If the field doesn't exist the flow doesn't blow up: the template stays as is
         assert render("{t_json[text]}", {}) == "{t_json[text]}"

@@ -1,11 +1,11 @@
-"""GraphRAG local: grafo de entidades y relaciones extraído por el LLM de los fragmentos de una colección.
+"""Local GraphRAG: a graph of entities and relations extracted by the LLM from a collection's chunks.
 
-Construcción:  por fragmento → entidades {nombre, tipo, descripción} y relaciones {origen, destino, relación}
-               → fusión por nombre normalizado → comunidades (Louvain) → resumen de las comunidades grandes.
-Consulta:      entidades más parecidas a la pregunta (embeddings + coincidencia de nombre) → vecinos a 1 salto
-               → contexto con relaciones + fragmentos donde aparecen + resúmenes de comunidad relevantes.
-Sirve para preguntas relacionales o de varios saltos («¿qué relación hay entre X e Y?», «¿quiénes participaron…?»)
-que la búsqueda por similitud responde mal porque la información está repartida en varios fragmentos.
+Building:  per chunk → entities {name, type, description} and relations {source, target, relation}
+                            → merge by normalized name → communities (Louvain) → summaries of the large communities.
+Querying:  the entities closest to the question (embeddings + name match) → 1-hop neighbours
+                            → context with relations + the chunks where they appear + relevant community summaries.
+It's for relational or multi-hop questions (“how are X and Y related?”, “who took part in…?”)
+that similarity search answers badly because the information is spread across several chunks.
 """
 import json
 import re
@@ -18,21 +18,21 @@ import numpy as np
 from ..config import settings
 from . import rag
 
-EXTRACT_PROMPT = """Extrae del TEXTO las entidades importantes (personas, organizaciones, lugares, conceptos,
-objetos, eventos, fechas clave) y las relaciones explícitas entre ellas.
-Devuelve SOLO JSON con esta forma:
-{{"entidades": [{{"nombre": "...", "tipo": "persona|organización|lugar|concepto|objeto|evento|fecha", "descripcion": "una frase"}}],
-  "relaciones": [{{"origen": "...", "destino": "...", "relacion": "verbo o frase corta"}}]}}
-Usa exactamente los mismos nombres de entidad en las relaciones. Máximo {max_ent} entidades.
+EXTRACT_PROMPT = """Extract from the TEXT the important entities (people, organizations, places, concepts,
+objects, events, key dates) and the explicit relations between them.
+Return ONLY JSON with this shape:
+{{"entities": [{{"name": "...", "type": "person|organization|place|concept|object|event|date", "description": "one sentence"}}],
+  "relations": [{{"source": "...", "target": "...", "relation": "a verb or short phrase"}}]}}
+Use exactly the same entity names in the relations. At most {max_ent} entities.
 
-TEXTO:
+TEXT:
 {text}"""
 
-COMMUNITY_PROMPT = """Estas entidades y relaciones forman un tema dentro de una base de documentos:
+COMMUNITY_PROMPT = """These entities and relations form a topic within a document base:
 {items}
 
-Escribe un título corto (máx. 8 palabras) en la primera línea y, debajo, un resumen de 3-5 frases de qué trata
-y cómo se relacionan las entidades principales."""
+Write a short title (max. 8 words) on the first line and, below it, a 3-5 sentence summary of what it's about
+and how the main entities relate."""
 
 _cache: dict[int, dict] = {}
 _lock = threading.Lock()
@@ -45,12 +45,12 @@ def _path(cid: int):
 def norm(name: str) -> str:
     s = unicodedata.normalize("NFKD", name.lower().strip())
     s = "".join(ch for ch in s if not unicodedata.combining(ch))
-    s = re.sub(r"^(el|la|los|las|the)\s+", "", s)
+    s = re.sub(r"^(the|a|an|el|la|los|las)\s+", "", s)
     return re.sub(r"[^a-z0-9]+", " ", s).strip()
 
 
 def _parse(out: str | None) -> dict:
-    """JSON del modelo; si viene cortado (límite de tokens), se cierra en el último objeto completo."""
+    """The model's JSON; if it's cut off (token limit), it's closed at the last complete object."""
     m = re.search(r"\{.*", out or "", re.S)
     if not m:
         return {}
@@ -81,49 +81,51 @@ def build(coll, task, sources: list[str] | None = None, max_chunks: int | None =
     if max_chunks:
         chunks = chunks[:max_chunks]
     if not chunks:
-        raise ValueError("La colección no tiene fragmentos")
+        raise ValueError("The collection has no chunks")
     ents: dict[str, dict] = {}
     edges: dict[tuple, dict] = {}
     failed = 0
     for n, (cid, doc, meta) in enumerate(chunks):
         if task.cancel_requested:
             break
-        task.update(0.85 * n / len(chunks), f"Fragmento {n + 1}/{len(chunks)} · {len(ents)} entidades, {len(edges)} relaciones")
+        task.update(0.85 * n / len(chunks), f"Chunk {n + 1}/{len(chunks)} · {len(ents)} entities, {len(edges)} relations")
         out = rag._llm(EXTRACT_PROMPT.format(text=doc[:2500], max_ent=max_entities), 700, helper)
         if out is None and n == 0:
-            raise RuntimeError("Carga un modelo (Playground o Modelos) para extraer el grafo")
+            raise RuntimeError("Load a model (Playground or Models) to extract the graph")
         data = _parse(out)
         if not data:
             failed += 1
             continue
-        for e in data.get("entidades") or []:
-            if not isinstance(e, dict) or not str(e.get("nombre", "")).strip():
+        for e in data.get("entities") or data.get("entidades") or []:
+            name = str(e.get("name") or e.get("nombre") or "").strip() if isinstance(e, dict) else ""
+            if not name:
                 continue
-            key = norm(e["nombre"])
-            # Descarta ruido típico de modelos pequeños: nombres vacíos, sólo cifras o demasiado largos
+            key = norm(name)
+            # Drop the usual noise from small models: empty names, digits only, or too long
             if len(key) < 3 or key.isdigit() or len(key) > 60:
                 continue
-            ent = ents.setdefault(key, {"name": e["nombre"].strip(), "types": Counter(), "descs": [], "chunks": [],
+            ent = ents.setdefault(key, {"name": name, "types": Counter(), "descs": [], "chunks": [],
                                         "sources": set()})
-            ent["types"][str(e.get("tipo") or "concepto").lower()] += 1
-            if e.get("descripcion") and len(ent["descs"]) < 4 and e["descripcion"] not in ent["descs"]:
-                ent["descs"].append(str(e["descripcion"]).strip())
+            ent["types"][str(e.get("type") or e.get("tipo") or "concept").lower()] += 1
+            desc = e.get("description") or e.get("descripcion")
+            if desc and len(ent["descs"]) < 4 and desc not in ent["descs"]:
+                ent["descs"].append(str(desc).strip())
             if cid not in ent["chunks"]:
                 ent["chunks"].append(cid)
             ent["sources"].add(meta.get("source", ""))
-        for r in data.get("relaciones") or []:
+        for r in data.get("relations") or data.get("relaciones") or []:
             if not isinstance(r, dict):
                 continue
-            a, b = norm(str(r.get("origen", ""))), norm(str(r.get("destino", "")))
+            a, b = norm(str(r.get("source") or r.get("origen") or "")), norm(str(r.get("target") or r.get("destino") or ""))
             if not a or not b or a == b or a not in ents or b not in ents:
                 continue
-            rel = str(r.get("relacion") or "relacionado con").strip()[:80]
+            rel = str(r.get("relation") or r.get("relacion") or "related to").strip()[:80]
             e = edges.setdefault((a, b, rel.lower()), {"source": a, "target": b, "relation": rel, "chunks": [], "weight": 0})
             e["weight"] += 1
             if cid not in e["chunks"]:
                 e["chunks"].append(cid)
 
-    # Comunidades (Louvain) sobre el grafo no dirigido
+    # Communities (Louvain) on the undirected graph
     import networkx as nx
     G = nx.Graph()
     G.add_nodes_from(ents)
@@ -137,19 +139,19 @@ def build(coll, task, sources: list[str] | None = None, max_chunks: int | None =
         for ci, members in enumerate(big):
             if task.cancel_requested:
                 break
-            task.update(0.85 + 0.14 * ci / max(1, len(big)), f"Resumiendo comunidad {ci + 1}/{len(big)}")
+            task.update(0.85 + 0.14 * ci / max(1, len(big)), f"Summarizing community {ci + 1}/{len(big)}")
             top = sorted(members, key=lambda k: -G.degree(k))[:15]
             rels = [f"{ents[e['source']]['name']} —{e['relation']}→ {ents[e['target']]['name']}"
                     for e in edges.values() if e["source"] in members and e["target"] in members][:25]
-            title, summary = f"Tema {ci + 1}", ""
+            title, summary = f"Topic {ci + 1}", ""
             if summarize_communities:
                 items = "\n".join([f"- {ents[k]['name']}: {(ents[k]['descs'] or [''])[0]}" for k in top] + rels)
                 out = rag._llm(COMMUNITY_PROMPT.format(items=items[:4000]), 260, helper) or ""
                 lines = [l.strip("#*: ") for l in out.strip().splitlines() if l.strip()]
                 if lines:
-                    # Los modelos a veces escriben «Título: X» o lo marcan en negrita
+                    # Models sometimes write “Title: X” or mark it in bold
                     first = re.sub(r"^\W*(t[ií]tulo|title)\W*[:\-]?\s*", "", lines[0], flags=re.I).strip("*_# ")
-                    title = (first or f"Tema {ci + 1}")[:80]
+                    title = (first or f"Topic {ci + 1}")[:80]
                     summary = " ".join(l for l in lines[1:] if not re.match(r"^\W*(resumen|summary)\W*:?$", l, re.I))
             comms.append({"id": ci, "title": title, "summary": summary, "entities": sorted(members, key=lambda k: -G.degree(k))})
     for ci, c in enumerate(comms):
@@ -172,7 +174,7 @@ def build(coll, task, sources: list[str] | None = None, max_chunks: int | None =
 
 
 def exists(cid: int) -> bool:
-    """¿Hay grafo construido? (sin cargarlo ni calcular embeddings)"""
+    """Is there a built graph? (without loading it or computing embeddings)"""
     return _path(cid).exists()
 
 
@@ -202,14 +204,14 @@ def drop(cid: int) -> None:
 
 
 def query(coll, question: str, k_entities: int = 6, max_relations: int = 25) -> dict | None:
-    """Subgrafo relevante para la pregunta: entidades semilla, vecinos, relaciones, fragmentos y comunidades."""
+    """Subgraph relevant to the question: seed entities, neighbours, relations, chunks and communities."""
     g = load(coll.id)
     if not g or not g["_keys"]:
         return None
     qv = np.array(rag.embed(g["embed_model"], [question], "query")[0])
     sims = g["_vecs"] @ qv
     qn = f" {norm(question)} "
-    for i, k in enumerate(g["_keys"]):  # coincidencia literal del nombre en la pregunta
+    for i, k in enumerate(g["_keys"]):  # literal match of the name in the question
         if len(k) > 2 and f" {k} " in qn:
             sims[i] += 0.3
     seeds = [g["_keys"][i] for i in np.argsort(-sims)[:k_entities] if sims[i] > 0.75]
@@ -238,19 +240,19 @@ def query(coll, question: str, k_entities: int = 6, max_relations: int = 25) -> 
     if len(g["_cvecs"]):
         cs = g["_cvecs"] @ qv
         comms = [g["communities"][i] for i in np.argsort(-cs)[:2] if cs[i] > 0.78]
-    lines = ["Entidades relevantes:"]
+    lines = ["Relevant entities:"]
     lines += [f"- {E[k]['name']} ({E[k]['type']}): {'; '.join(E[k]['descs'][:2])}" for k in seeds + neighbors[:5]]
     if rels:
-        lines += ["Relaciones:"] + [f"- {E[e['source']]['name']} —{e['relation']}→ {E[e['target']]['name']}" for e in rels]
+        lines += ["Relations:"] + [f"- {E[e['source']]['name']} —{e['relation']}→ {E[e['target']]['name']}" for e in rels]
     for c in comms:
-        lines += [f"Tema «{c['title']}»: {c['summary']}"]
+        lines += [f"Topic “{c['title']}”: {c['summary']}"]
     return {"context": "\n".join(lines), "seeds": [E[k]["name"] for k in seeds], "neighbors": [E[k]["name"] for k in neighbors],
             "relations": len(rels), "chunk_ids": [c for c, _ in chunk_votes.most_common(8)],
             "communities": [c["title"] for c in comms]}
 
 
 def view(cid: int, limit: int = 250) -> dict | None:
-    """Nodos y aristas para visualizar (los más conectados)."""
+    """Nodes and edges to visualize (the most connected ones)."""
     g = load(cid)
     if not g:
         return None

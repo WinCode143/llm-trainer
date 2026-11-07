@@ -21,18 +21,18 @@ def template(key: str):
     if not t:
         raise HTTPException(404)
     t = copy.deepcopy(t)
-    # Los nodos MCP de una plantilla nombran el servidor por su clave del catálogo; aquí se enlazan al que
-    # tengas registrado. Si no lo tienes, el nodo queda sin servidor y el flujo avisa antes de ejecutarse.
+    # A template's MCP nodes name the server by its catalog key; here they're linked to the one
+    # you have registered. If you don't have it, the node stays without a server and the flow warns before running.
     from sqlmodel import Session
 
     from ..db import engine
-    from .connections import CATALOGO, PROPIO, _asegurar, _instalado
+    from .connections import CATALOG, OWN, _ensure, _installed
     with Session(engine) as s:
         for n in t["spec"]["nodes"]:
-            clave = (n.get("config") or {}).get("mcp_catalogo")
-            c = next((x for x in CATALOGO if x["key"] == clave), None)
-            # El propio servidor siempre existe: se registra si hace falta, no toca nada fuera
-            m = _asegurar(s, PROPIO) if clave == PROPIO else (_instalado(s, c) if c else None)
+            key = (n.get("config") or {}).get("mcp_catalog")
+            c = next((x for x in CATALOG if x["key"] == key), None)
+            # Our own server always exists: it's registered if needed, nothing outside is touched
+            m = _ensure(s, OWN) if key == OWN else (_installed(s, c) if c else None)
             if m:
                 n["config"].setdefault("config", {})["server_id"] = m.id
     return t
@@ -57,7 +57,7 @@ def list_flows(s: Session = Depends(get_session)):
 @router.post("")
 def create(body: FlowBody, s: Session = Depends(get_session)):
     if s.exec(select(Flow).where(Flow.name == body.name)).first():
-        raise HTTPException(409, "Ya existe un flujo con ese nombre")
+        raise HTTPException(409, "There's already a flow with that name")
     f = Flow(**body.model_dump())
     s.add(f)
     s.commit()
@@ -99,7 +99,7 @@ class RunBody(BaseModel):
 
 
 def _stream_events(run_id: int, source):
-    """Consume los eventos de una ejecución guardando el progreso en la base de datos."""
+    """Consumes a run's events, saving the progress to the database."""
     from .chat import ndjson_stream
 
     def gen():
@@ -115,7 +115,7 @@ def _stream_events(run_id: int, source):
             elif ev["type"] == "error":
                 status, error = "failed", ev["message"]
             elif ev["type"] == "token":
-                yield {**ev, "run_id": run_id}   # los tokens no se guardan, sólo se ven pasar
+                yield {**ev, "run_id": run_id}   # tokens aren't saved, they're only streamed through
                 continue
             with Session(engine) as s:
                 r = s.get(FlowRun, run_id)
@@ -136,7 +136,7 @@ def _stream_events(run_id: int, source):
 
 
 def _stream(fid: int, run_id: int, spec: dict, inputs: dict, thread_id: str | None, resume=None):
-    """Ejecuta el flujo guardando el progreso en la base de datos (para reanudar tras una aprobación)."""
+    """Runs the flow, saving the progress to the database (to resume after an approval)."""
     return _stream_events(run_id, svc.run(spec, inputs, thread_id=thread_id, resume=resume))
 
 
@@ -160,10 +160,10 @@ class ResumeBody(BaseModel):
 
 @router.post("/runs/{rid}/resume")
 def resume_run(rid: int, body: ResumeBody, s: Session = Depends(get_session)):
-    """Continúa un flujo detenido en un nodo de aprobación."""
+    """Continues a flow paused at an approval node."""
     r = s.get(FlowRun, rid)
     if not r or r.status != "waiting":
-        raise HTTPException(400, "Esa ejecución no está esperando aprobación")
+        raise HTTPException(400, "That run isn't waiting for approval")
     f = s.get(Flow, r.flow_id)
     payload = {"rejected": not body.approved, "comment": body.comment, "edited": body.edited}
     r.status = "running"
@@ -174,10 +174,10 @@ def resume_run(rid: int, body: ResumeBody, s: Session = Depends(get_session)):
 
 @router.get("/runs/{rid}/history")
 def run_history(rid: int, s: Session = Depends(get_session)):
-    """Puntos de guardado de una ejecución: desde cuáles se puede rebobinar."""
+    """A run's checkpoints: the ones you can rewind from."""
     r = s.get(FlowRun, rid)
     if not r or not r.thread_id:
-        raise HTTPException(404, "Esa ejecución no tiene puntos de guardado")
+        raise HTTPException(404, "That run has no checkpoints")
     f = s.get(Flow, r.flow_id)
     return {"thread_id": r.thread_id, "checkpoints": svc.history(f.spec, r.thread_id)}
 
@@ -189,23 +189,23 @@ class ReplayBody(BaseModel):
 
 @router.post("/runs/{rid}/replay")
 def replay_run(rid: int, body: ReplayBody, s: Session = Depends(get_session)):
-    """Reanuda desde un punto de guardado, opcionalmente cambiando variables.
+    """Resumes from a checkpoint, optionally changing variables.
 
-    No se repite lo anterior: se aprovecha lo que ya se calculó hasta ese punto."""
+    What came before isn't repeated: what was already computed up to that point is reused."""
     r = s.get(FlowRun, rid)
     if not r or not r.thread_id:
         raise HTTPException(404)
     f = s.get(Flow, r.flow_id)
-    nuevo = FlowRun(flow_id=r.flow_id, inputs=r.inputs, status="running", thread_id=r.thread_id)
-    s.add(nuevo)
+    new_run = FlowRun(flow_id=r.flow_id, inputs=r.inputs, status="running", thread_id=r.thread_id)
+    s.add(new_run)
     s.commit()
-    s.refresh(nuevo)
-    return _stream_events(nuevo.id, svc.replay(f.spec, r.thread_id, body.checkpoint_id, body.edits or None))
+    s.refresh(new_run)
+    return _stream_events(new_run.id, svc.replay(f.spec, r.thread_id, body.checkpoint_id, body.edits or None))
 
 
 @router.get("/{fid}/export")
 def export_flow(fid: int, s: Session = Depends(get_session)):
-    """El flujo como código LangGraph, para no depender de esta aplicación."""
+    """The flow as LangGraph code, so you don't depend on this application."""
     f = s.get(Flow, fid)
     if not f:
         raise HTTPException(404)

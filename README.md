@@ -175,7 +175,6 @@ The tests cover:
 
 ## Limitations
 
-- The interface and the code comments are in Spanish. The documentation is in English.
 - Single user, single GPU: jobs are queued, not parallel.
 - Training and local transformers inference need CUDA. AMD and Apple GPUs aren't
   supported, except for GGUF inference through Vulkan.

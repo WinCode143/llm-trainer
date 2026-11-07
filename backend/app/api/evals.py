@@ -20,11 +20,11 @@ class EvalBody(BaseModel):
     questions: list[Question]
     system_prompt: str | None = None
     rag_collection_id: int | None = None
-    rag_k: int | None = None  # None = top_k de la colección
-    rag_modes: list[str] = Field(default_factory=lambda: ["off", "on"])  # evalúa cada modelo sin y/o con RAG
+    rag_k: int | None = None  # None = the collection's top_k
+    rag_modes: list[str] = Field(default_factory=lambda: ["off", "on"])  # evaluates each model without and/or with RAG
     rag_system_prompt: str | None = None
     judge_model_id: int | None = None
-    judge_helper: int | None = None  # juez externo: no ocupa VRAM
+    judge_helper: int | None = None  # external judge: uses no VRAM
     quantization: str = "none"
     params: dict = Field(default_factory=lambda: {"max_new_tokens": 512, "temperature": 0.2, "enable_thinking": False})
 
@@ -37,14 +37,14 @@ def list_runs(limit: int = 200, offset: int = 0, s: Session = Depends(get_sessio
 @router.post("")
 def create(body: EvalBody, s: Session = Depends(get_session)):
     if not body.model_ids or not body.questions:
-        raise HTTPException(400, "Selecciona al menos un modelo y una pregunta")
+        raise HTTPException(400, "Select at least one model and one question")
     if body.rag_collection_id and not set(body.rag_modes) & {"on", "off"}:
-        raise HTTPException(400, "Elige al menos un modo: sin RAG y/o con RAG")
+        raise HTTPException(400, "Choose at least one mode: without RAG and/or with RAG")
     run = EvalRun(name=body.name, config=body.model_dump(mode="json"))
     s.add(run)
     s.commit()
     s.refresh(run)
-    t = tasks.submit("eval", f"Evaluación {body.name}", lambda task: evaluation.run_eval(run.id, task))
+    t = tasks.submit("eval", f"Evaluation {body.name}", lambda task: evaluation.run_eval(run.id, task))
     return {"run": run, "task": t.to_dict()}
 
 
@@ -57,11 +57,11 @@ class GenQuestions(BaseModel):
 
 @router.post("/generate-questions")
 def generate_questions(body: GenQuestions):
-    """Genera preguntas+referencias desde los documentos con el modelo cargado (set de evaluación automático)."""
+    """Generates questions + references from the documents with the loaded model (an automatic evaluation set)."""
     from ..services.inference import manager
     if not manager.current:
-        raise HTTPException(400, "Carga un modelo para generar las preguntas")
-    return tasks.submit("eval-qgen", "Generar preguntas de evaluación", lambda task: evaluation.generate_questions(
+        raise HTTPException(400, "Load a model to generate the questions")
+    return tasks.submit("eval-qgen", "Generate evaluation questions", lambda task: evaluation.generate_questions(
         task, body.collection_id, body.n_chunks, body.per_chunk, body.sources)).to_dict()
 
 

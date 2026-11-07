@@ -10,19 +10,19 @@ export type Provider = {
 };
 type Preset = { key: string; label: string; kind: string; base_url: string; api_key: string; model: string; note: string };
 
-/** Desplegable de «modelo ayudante», repartido por las pantallas que generan texto.
- *  `null` = el modelo cargado en VRAM (opción por defecto y gratuita). */
-export function HelperPicker({ value, onChange, label = "Modelo ayudante", hint }: {
+/** “Helper model” picker, used across the screens that generate text.
+  *  `null` = the model loaded in VRAM (the default, and free). */
+export function HelperPicker({ value, onChange, label = "Helper model", hint }: {
   value: number | null; onChange: (v: number | null) => void; label?: string; hint?: string;
 }) {
   const [choices] = useData<Choice[]>("/api/providers/choices", 15000);
   const solo = (choices?.length ?? 0) <= 1;
   return (
-    <Field label={label} hint={hint ?? (solo ? "Añade modelos externos en Sistema → Modelos ayudantes" : "Delega esta tarea en un modelo más potente")}>
+    <Field label={label} hint={hint ?? (solo ? "Add external models in System → Helper models" : "Hand this task to a stronger model")}>
       <select value={value ?? ""} onChange={(e) => onChange(e.target.value === "" ? null : +e.target.value)}>
         {choices?.map((c) => (
           <option key={c.id ?? "local"} value={c.id ?? ""} disabled={!c.ready}>
-            {c.label}{c.ready ? "" : " — sin modelo cargado"}
+            {c.label}{c.ready ? "" : " — no model loaded"}
           </option>
         ))}
       </select>
@@ -32,7 +32,7 @@ export function HelperPicker({ value, onChange, label = "Modelo ayudante", hint 
 
 const EMPTY = { name: "", kind: "openai", base_url: "", api_key: "", model: "", enabled: true, note: "" };
 
-/** Alta y gestión de modelos ayudantes externos (pantalla Sistema). */
+/** Adding and managing external helper models (System screen). */
 export function Providers() {
   const [list, reload] = useData<Provider[]>("/api/providers");
   const [meta] = useData<{ presets: Preset[]; kinds: Record<string, any> }>("/api/providers/presets");
@@ -50,7 +50,7 @@ export function Providers() {
       else await api.post("/api/providers", form);
       setForm(null);
       reload();
-      notify("Modelo ayudante guardado");
+      notify("Helper model saved");
     } catch (e: any) { notify(e.message, "err"); } finally { setBusy(null); }
   };
 
@@ -59,12 +59,12 @@ export function Providers() {
     try {
       const r = await api.post<any>(`/api/providers/${p.id}/test`);
       setResults({ ...results, [p.id]: r });
-      notify(r.ok ? `${p.name} responde en ${r.seconds}s` : `${p.name}: ${r.error}`, r.ok ? "info" : "err");
+      notify(r.ok ? `${p.name} answered in ${r.seconds}s` : `${p.name}: ${r.error}`, r.ok ? "info" : "err");
     } finally { setBusy(null); }
   };
 
   const remove = async (p: Provider) => {
-    if (!(await dialog.confirm("Borrar ayudante", `¿Borrar «${p.name}»? Los sitios que lo usen volverán al modelo local.`))) return;
+    if (!(await dialog.confirm("Delete helper", `Delete “${p.name}”? Whatever uses it will go back to the local model.`))) return;
     await api.del(`/api/providers/${p.id}`);
     reload();
   };
@@ -72,31 +72,31 @@ export function Providers() {
   return (
     <div className="card">
       <div className="row between">
-        <h2 style={{ margin: 0 }}><Server size={16} /> Modelos ayudantes</h2>
-        <button className="primary sm" onClick={() => setForm({ ...EMPTY })}><Plus size={13} /> Añadir</button>
+        <h2 style={{ margin: 0 }}><Server size={16} /> Helper models</h2>
+        <button className="primary sm" onClick={() => setForm({ ...EMPTY })}><Plus size={13} /> Add</button>
       </div>
       <div className="sub" style={{ marginTop: 6 }}>
-        Modelos externos a los que delegar las tareas donde un modelo pequeño se queda corto: generar datasets
-        sintéticos, extraer el grafo de conocimiento, hacer de juez en las evaluaciones o resolver un nodo de un flujo.
-        Vale cualquier servidor compatible con la API de OpenAI (Ollama o LM Studio en tu PC, un vLLM en otra máquina,
-        OpenRouter, Groq, DeepSeek…) y la API de Anthropic. El modelo cargado en VRAM sigue siendo el de por defecto.
+        External models to hand off the tasks a small model is bad at: generating synthetic
+        datasets, extracting the knowledge graph, judging evaluations or running a flow node.
+        Any server compatible with the OpenAI API works (Ollama or LM Studio on your PC, vLLM on another machine,
+        OpenRouter, Groq, DeepSeek…), and so does the Anthropic API. The model loaded in VRAM stays the default.
       </div>
       <div className="warn" style={{ marginTop: 8 }}>
-        Las claves se guardan <b>en claro</b> en la base de datos local (<code>data/llmtrainer.db</code>). No salen de tu
-        máquina salvo hacia el proveedor, pero quien tenga acceso al archivo puede leerlas. Entra en las copias de seguridad.
+        Keys are stored <b>in plain text</b> in the local database (<code>data/llmtrainer.db</code>). They never leave your
+        machine except towards the provider, but anyone who can read that file can read them. They're included in backups.
       </div>
 
-      {!list?.length && <div className="empty" style={{ fontSize: 13, marginTop: 10 }}>Sin ayudantes: todo usa el modelo cargado</div>}
+      {!list?.length && <div className="empty" style={{ fontSize: 13, marginTop: 10 }}>No helpers: everything uses the loaded model</div>}
       {!!list?.length && (
         <table style={{ marginTop: 10 }}>
-          <thead><tr><th>Nombre</th><th>Modelo</th><th>Endpoint</th><th>Clave</th><th /></tr></thead>
+          <thead><tr><th>Name</th><th>Model</th><th>Endpoint</th><th>Key</th><th /></tr></thead>
           <tbody>
             {list.map((p) => (
               <tr key={p.id}>
                 <td>
                   <b>{p.enabled ? p.name : <s>{p.name}</s>}</b>
                   {results[p.id] && <div className="sub" style={{ fontSize: 12 }}>
-                    {results[p.id].ok ? `✓ ${results[p.id].seconds}s · «${results[p.id].reply}»` : `✗ ${results[p.id].error}`}
+                    {results[p.id].ok ? `✓ ${results[p.id].seconds}s · “${results[p.id].reply}”` : `✗ ${results[p.id].error}`}
                   </div>}
                 </td>
                 <td><code>{p.model || "—"}</code></td>
@@ -104,9 +104,9 @@ export function Providers() {
                 <td className="sub">{p.has_key ? p.api_key : "—"}</td>
                 <td style={{ whiteSpace: "nowrap" }}>
                   <button className="sm" disabled={busy === p.id} onClick={() => probe(p)}>
-                    {busy === p.id ? <Spinner /> : <Zap size={12} />} Probar
+                    {busy === p.id ? <Spinner /> : <Zap size={12} />} Test
                   </button>
-                  <button className="sm" onClick={() => setForm({ ...p, api_key: "" })}>Editar</button>
+                  <button className="sm" onClick={() => setForm({ ...p, api_key: "" })}>Edit</button>
                   <button className="icon" onClick={() => remove(p)}><Trash2 size={13} /></button>
                 </td>
               </tr>
@@ -118,7 +118,7 @@ export function Providers() {
       {form && (
         <div className="card" style={{ marginTop: 12 }}>
           {!form.id && !!meta?.presets?.length && (
-            <Field label="Empezar desde un atajo" hint="Rellena la URL y el modelo típico; luego lo puedes cambiar">
+            <Field label="Start from a preset" hint="Fills in the URL and a typical model; you can change them afterwards">
               <div className="palette">
                 {meta.presets.map((p) => (
                   <button key={p.key} title={p.note} onClick={() => setForm({
@@ -130,29 +130,29 @@ export function Providers() {
             </Field>
           )}
           <div className="grid g3">
-            <Field label="Nombre"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
-            <Field label="Tipo">
+            <Field label="Name"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+            <Field label="Type">
               <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}>
                 {Object.entries(meta?.kinds ?? {}).map(([k, v]: any) => <option key={k} value={k}>{v.label}</option>)}
               </select>
             </Field>
-            <Field label="Modelo" hint="Nombre exacto en ese proveedor">
+            <Field label="Model" hint="Exact name at that provider">
               <input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} />
             </Field>
           </div>
           <div className="grid g2">
-            <Field label="URL base" hint="Debe terminar en /v1 en la mayoría de servidores">
+            <Field label="Base URL" hint="Most servers need it to end in /v1">
               <input value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} />
             </Field>
-            <Field label="Clave de API" hint={form.id ? "Vacío = conservar la actual" : "Los servidores locales suelen aceptar cualquier cosa"}>
+            <Field label="API key" hint={form.id ? "Empty = keep the current one" : "Local servers usually accept anything"}>
               <input type="password" value={form.api_key} onChange={(e) => setForm({ ...form, api_key: e.target.value })} />
             </Field>
           </div>
-          <Check label="Activo" checked={form.enabled} onChange={(enabled) => setForm({ ...form, enabled })} />
+          <Check label="Enabled" checked={form.enabled} onChange={(enabled) => setForm({ ...form, enabled })} />
           <div className="row end" style={{ marginTop: 8 }}>
-            <button onClick={() => setForm(null)}><X size={13} /> Cancelar</button>
+            <button onClick={() => setForm(null)}><X size={13} /> Cancel</button>
             <button className="primary" disabled={!form.name.trim() || !form.base_url.trim() || busy === "save"} onClick={save}>
-              {busy === "save" ? <Spinner /> : <CheckIcon size={13} />} Guardar
+              {busy === "save" ? <Spinner /> : <CheckIcon size={13} />} Save
             </button>
           </div>
         </div>

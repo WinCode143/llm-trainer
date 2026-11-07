@@ -1,10 +1,10 @@
-"""Extracción de texto de documentos y descarga de páginas web.
+"""Text extraction from documents, and downloading web pages.
 
-Cada formato tiene su camino: los PDF por pymupdf4llm con OCR o por Docling cuando el layout y las
-tablas importan, el HTML por un parser propio (las expresiones regulares dejaban pasar el JSON de
-Wikipedia), y DOCX/PPTX/XLSX por Docling siempre.
+Each format has its own path: PDFs through pymupdf4llm with OCR, or Docling when layout and
+tables matter; HTML through our own parser (regular expressions let Wikipedia's JSON
+through); and DOCX/PPTX/XLSX always through Docling.
 
-Vivía dentro de rag.py, que llegó a 1.200 líneas mezclando extraer, trocear, indexar y buscar.
+It used to live inside rag.py, which grew to 1,200 lines mixing extraction, chunking, indexing and search.
 """
 import io
 import re
@@ -15,9 +15,9 @@ from pathlib import Path
 from ..config import settings
 
 
-# ---------------- extracción ----------------
+# ---------------- extraction ----------------
 def _pdf_pages(raw: bytes) -> list[tuple[str, dict]]:
-    """PDF → Markdown por página (títulos, listas y tablas) con pymupdf4llm; texto plano si falla."""
+    """PDF → Markdown per page (headings, lists and tables) with pymupdf4llm; plain text if that fails."""
     import pymupdf
     doc = pymupdf.open(stream=raw, filetype="pdf")
     try:
@@ -30,12 +30,12 @@ def _pdf_pages(raw: bytes) -> list[tuple[str, dict]]:
         if any(t.strip() for t, _ in out):
             return out
     except Exception as e:  # noqa: BLE001
-        print("[rag] pymupdf4llm falló, usando texto plano:", e)
+        print("[rag] pymupdf4llm failed, using plain text:", e)
     return [(page.get_text(), {"page": i + 1}) for i, page in enumerate(doc)]
 
 
 def _docx(raw: bytes) -> str:
-    """DOCX → Markdown: títulos como #, tablas como filas | a | b |."""
+    """DOCX → Markdown: headings as #, tables as | a | b | rows."""
     import docx
     from docx.table import Table
     from docx.text.paragraph import Paragraph
@@ -67,16 +67,16 @@ def _docx(raw: bytes) -> str:
 
 
 class _HTMLToMarkdown(HTMLParser):
-    """HTML → Markdown sencillo con un parser real (robusto frente a atributos con '>' dentro)."""
+    """HTML → simple Markdown with a real parser (robust to attributes with '>' inside)."""
     SKIP = {"script", "style", "nav", "footer", "header", "noscript", "svg", "button", "form"}
     BLOCK = {"p", "div", "section", "article", "tr", "table", "ul", "ol", "blockquote", "figure", "dl"}
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.out: list[str] = []
-        self.skip = 0  # profundidad dentro de elementos ignorados
+        self.skip = 0  # depth inside ignored elements
 
-    # Elementos vacíos: nunca tienen etiqueta de cierre, así que no deben contar en la profundidad ignorada
+    # Void elements: they never have a closing tag, so they mustn't count towards the ignored depth
     VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr", "param"}
 
     def handle_starttag(self, tag, attrs):
@@ -85,7 +85,7 @@ class _HTMLToMarkdown(HTMLParser):
                 self.out.append("\n")
             return
         a = dict(attrs)
-        # Notas al pie tipo [16] y cajas de mantenimiento/navegación
+        # Footnotes like [16] and maintenance/navigation boxes
         cls = a.get("class") or ""
         if self.skip or tag in self.SKIP or (tag == "sup" and "reference" in cls) or "navbox" in cls or "mw-editsection" in cls:
             self.skip += 1
@@ -125,7 +125,7 @@ def _html(text: str) -> str:
     md = "".join(p.out)
     md = re.sub(r"[ \t\xa0]+", " ", md)
     md = re.sub(r" *\n *", "\n", md)
-    # Un título debe ir en una sola línea
+    # A heading must be on a single line
     md = re.sub(r"^(#{1,6}) *\n+", r"\1 ", md, flags=re.M)
     return re.sub(r"\n{3,}", "\n\n", md).strip()
 
@@ -146,7 +146,7 @@ def _docling_converter():
 
 
 def _docling_pages(filename: str, raw: bytes, ext: str) -> list[tuple[str, dict]]:
-    """Docling: análisis de layout (columnas, cabeceras, pies) y estructura de tablas → Markdown por página."""
+    """Docling: layout analysis (columns, headers, footers) and table structure → Markdown per page."""
     from docling.datamodel.base_models import DocumentStream
     stream = DocumentStream(name=Path(filename).stem + ext, stream=io.BytesIO(raw))
     doc = _docling_converter().convert(stream).document
@@ -159,7 +159,7 @@ def _docling_pages(filename: str, raw: bytes, ext: str) -> list[tuple[str, dict]
 
 
 def extract(filename: str, raw: bytes, ext: str | None = None, parser: str = "auto") -> list[tuple[str, dict]]:
-    """Devuelve [(markdown, metadatos)] por página/documento. `ext` fuerza el tipo (p. ej. para URLs)."""
+    """Returns [(markdown, metadata)] per page/document. `ext` forces the type (e.g. for URLs)."""
     ext = ext or Path(filename).suffix.lower()
     if (parser == "docling" and ext in DOCLING_EXT) or ext in (".pptx", ".xlsx"):
         try:
@@ -167,7 +167,7 @@ def extract(filename: str, raw: bytes, ext: str | None = None, parser: str = "au
         except Exception as e:  # noqa: BLE001
             if ext in (".pptx", ".xlsx"):
                 raise
-            print(f"[rag] Docling falló con {filename} ({e}); usando el parser rápido")
+            print(f"[rag] Docling failed with {filename} ({e}); using the fast parser")
     if ext == ".pdf":
         return _pdf_pages(raw)
     if ext == ".docx":
@@ -179,7 +179,7 @@ def extract(filename: str, raw: bytes, ext: str | None = None, parser: str = "au
 
 
 
-# ---------------- conector web ----------------
+# ---------------- web connector ----------------
 UA = "Mozilla/5.0 (X11; Linux x86_64) LLMTrainer/0.1"
 
 
@@ -195,7 +195,7 @@ def sitemap_urls(url: str, limit: int) -> list[str]:
     locs = re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", xml)
     out: list[str] = []
     for loc in locs:
-        if loc.endswith(".xml") and len(out) < limit:  # índice de sitemaps anidado
+        if loc.endswith(".xml") and len(out) < limit:  # nested sitemap index
             try:
                 out += sitemap_urls(loc, limit - len(out))
             except Exception:  # noqa: BLE001
@@ -208,7 +208,7 @@ def sitemap_urls(url: str, limit: int) -> list[str]:
 
 
 def url_ext(url: str, raw: bytes) -> str:
-    """Tipo de documento de una URL descargada, por contenido (la URL puede no tener extensión)."""
+    """Document type of a downloaded URL, by content (the URL may have no extension)."""
     if raw[:5] == b"%PDF-":
         return ".pdf"
     suffix = Path(url.split("?")[0]).suffix.lower()
